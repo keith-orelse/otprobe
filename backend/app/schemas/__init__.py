@@ -156,6 +156,8 @@ class AssetDetail(AssetSummary):
     deploy_agent: ActionState
     agentless: ActionState
     last_probe_id: str | None = None
+    maintenance_window_required: bool = False
+    current_agent_id: str | None = None
     notes: list[str] = []
 
 
@@ -249,3 +251,183 @@ class DashboardSummary(Camel):
     last_discovery: DiscoveryJob | None
     recent_events: list[AuditEvent]
     adapters: list[dict[str, Any]]
+
+
+# ---------------------------------------------------------------- Phase 3: auth, approvals, deployment, agents
+class LoginRequest(Camel):
+    username: str = Field(examples=["operator"])
+    password: str = Field(examples=["operator-demo"])
+
+
+class User(Camel):
+    id: str
+    username: str
+    display_name: str
+    role: str
+    permissions: list[str] = []
+
+
+class LoginResponse(Camel):
+    access_token: str
+    token_type: str = "bearer"
+    expires_in_sec: int
+    user: User
+
+
+class StreamTicket(Camel):
+    ticket: str
+    expires_in_sec: int
+
+
+class Package(Camel):
+    id: str
+    name: str
+    version: str
+    architecture: str
+    sha256: str
+    size_bytes: int
+    supported_os: list[str]
+    status: str
+    release_notes: str
+    created_at: datetime
+
+
+class MaintenanceWindow(Camel):
+    start: datetime
+    end: datetime
+
+
+class DeploymentCreate(Camel):
+    asset_id: str
+    package_id: str = Field(examples=["pkg-probe-agent-1.1.0"])
+    credential_profile: str = "OT-WINDOWS-INSTALLER"
+    purpose: str = Field(min_length=3, max_length=500, examples=["Deep compliance monitoring"])
+    maintenance_window: MaintenanceWindow | None = None
+
+
+class Decision(Camel):
+    reason: str | None = Field(None, max_length=500)
+
+
+class Approval(Camel):
+    id: str
+    subject_kind: str
+    subject_id: str
+    target_asset_id: str
+    target_name: str | None = None
+    requested_by: str
+    purpose: str
+    criticality: str | None
+    maintenance_window: MaintenanceWindow | None = None
+    status: str
+    decided_by: str | None
+    decided_at: datetime | None
+    reason: str | None
+    created_at: datetime
+    actions: dict[str, ActionState] = {}
+
+
+class PrecheckResult(Camel):
+    run_no: int
+    seq: int
+    check: str
+    status: str
+    detail: str
+    checked_at: datetime
+
+
+class Deployment(Camel):
+    id: str
+    asset_id: str
+    asset_name: str | None = None
+    package: Package | None = None
+    credential_profile: str
+    status: str
+    purpose: str
+    requested_by: str
+    approval: Approval | None = None
+    precheck_run_no: int
+    precheck_passed_at: datetime | None
+    precheck: list[PrecheckResult] = []
+    steps: list[WorkflowStep] = []
+    agent_id: str | None
+    failure_code: str | None
+    failure_detail: str | None
+    retry_of_id: str | None
+    correlation_id: str
+    created_at: datetime
+    deploy_started_at: datetime | None
+    enrolling_since: datetime | None
+    finished_at: datetime | None
+    actions: dict[str, ActionState] = {}
+
+
+class Agent(Camel):
+    id: str
+    asset_id: str
+    asset_name: str | None = None
+    deployment_id: str
+    status: str
+    version: str
+    credential_prefix: str | None
+    installed_at: datetime
+    enrolled_at: datetime | None
+    last_heartbeat_at: datetime | None
+    seconds_since_heartbeat: int | None = None
+    missed_heartbeats: int
+    heartbeat_interval_sec: float = 0
+    revoked_at: datetime | None
+    removed_at: datetime | None
+
+
+class HeartbeatRecord(Camel):
+    seq: int
+    received_at: datetime
+    agent_time: datetime | None
+    payload: dict[str, Any]
+
+
+class EnrollRequest(Camel):
+    enrollment_token: str
+    hostname: str
+    host_fingerprint: str
+    agent_version: str
+
+
+class EnrollResponse(Camel):
+    agent_id: str
+    agent_credential: str
+    heartbeat_interval_sec: float
+    task_poll_wait_sec: int
+
+
+class HeartbeatIn(Camel):
+    seq: int = Field(ge=0)
+    agent_time: datetime
+    agent_version: str | None = None
+    cpu_pct: float | None = None
+    mem_mb: float | None = None
+    queue_depth: int | None = None
+
+
+class DemoFault(Camel):
+    fault: str = Field(examples=["heartbeat_blocked"])
+    enabled: bool = True
+    params: dict[str, Any] = {}
+
+
+class DemoDevice(Camel):
+    device_id: str
+    ip: str
+    hostname: str
+    type: str
+    level: str
+    powered: bool
+    online: bool
+    agent_installed: bool
+    faults: list[str]
+
+
+class DemoState(Camel):
+    devices: list[DemoDevice]
+    available_faults: dict[str, str]

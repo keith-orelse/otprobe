@@ -1,11 +1,11 @@
 from fastapi import APIRouter, Depends
 
 from app import schemas
-from app.api.deps import CursorQ, LimitQ, get_ctx
+from app.api.deps import CursorQ, LimitQ, any_user, get_ctx
 from app.context import AppContext
 from app.services import assets
 
-router = APIRouter(prefix="/assets", tags=["assets"])
+router = APIRouter(prefix="/assets", tags=["assets"], dependencies=[Depends(any_user)])
 
 
 @router.get("", response_model=schemas.Page[schemas.AssetSummary])

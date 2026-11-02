@@ -4,14 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import json
-import socket
 
 import httpx
 import pytest
 import uvicorn
 
 from app.main import create_app
-from tests.conftest import BOTH_SUBNETS, make_settings
+from tests.conftest import BOTH_SUBNETS, free_port, make_settings
 
 pytestmark = pytest.mark.acceptance
 SENSORS = {"192.168.10.20", "192.168.10.21"}
@@ -105,15 +104,9 @@ async def test_offline_device_marked_after_discovery(discovered):
     assert plc2["status"] == "OFFLINE"
 
 
-def _free_port() -> int:
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
-
-
 async def test_sse_stream_over_http(db_path):
     """Real HTTP + SSE through uvicorn (loopback only), as the console consumes it."""
-    port = _free_port()
+    port = free_port()
     app = create_app(make_settings(db_path, speed_factor=0.02))
     server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
     task = asyncio.create_task(server.serve())
@@ -123,7 +116,11 @@ async def test_sse_stream_over_http(db_path):
     found, statuses = [], []
     try:
         async with httpx.AsyncClient(timeout=30) as client:
-            async with client.stream("GET", f"{base}/events/stream", params={"topics": "discovery"}) as stream:
+            login = await client.post(f"{base}/auth/login", json={"username": "operator", "password": "operator-demo"})
+            client.headers["Authorization"] = f"Bearer {login.json()['accessToken']}"
+            ticket = (await client.post(f"{base}/auth/stream-ticket")).json()["ticket"]
+            params = {"topics": "discovery", "ticket": ticket}
+            async with client.stream("GET", f"{base}/events/stream", params=params) as stream:
                 assert stream.headers["content-type"].startswith("text/event-stream")
                 r = await client.post(f"{base}/discovery/jobs", json={"targets": BOTH_SUBNETS},
                                       headers={"Idempotency-Key": "sse-test"})

@@ -11,10 +11,10 @@ from app.core.fields import GROUP_OF, GROUPS
 from app.engines.inventory import effective_fields
 from app.models import Asset, AssetField, AssetRelationship, ProbeRun, Zone
 from app.services.common import paginate
+from app.services.deployments import deploy_action_for_asset
 
 SORTABLE = {"ip": Asset.ip_num, "hostname": Asset.display_name, "lastSeen": Asset.last_seen, "level": Asset.level,
             "status": Asset.status, "type": Asset.device_type, "criticality": Asset.criticality}
-DEPLOY_PHASE3 = "Agent deployment workflow is not enabled yet (Phase 3)."
 
 
 def _source_label(registry: AdapterRegistry, source: str) -> str:
@@ -51,10 +51,6 @@ def list_assets(session: Session, limit: int, cursor: str | None, q: str | None,
                                               next_cursor=nxt, total=total)
 
 
-def _deploy_action(asset: Asset) -> schemas.ActionState:
-    if asset.eligibility in ("NOT_ELIGIBLE", "NOT_SUPPORTED", "UNKNOWN"):
-        return schemas.ActionState(enabled=False, reason=asset.eligibility_reason)
-    return schemas.ActionState(enabled=False, reason=DEPLOY_PHASE3)
 
 
 def get_asset(session: Session, registry: AdapterRegistry, asset_id: str) -> schemas.AssetDetail:
@@ -66,7 +62,8 @@ def get_asset(session: Session, registry: AdapterRegistry, asset_id: str) -> sch
     agentless = (schemas.ActionState(enabled=False, reason="An agentless probe is already running")
                  if running else schemas.ActionState(enabled=True, reason="Supported"))
     out = schemas.AssetDetail.model_validate({**schemas.AssetSummary.model_validate(asset).model_dump(),
-                                              "deploy_agent": _deploy_action(asset), "agentless": agentless})
+                                              "deploy_agent": deploy_action_for_asset(session, asset),
+                                              "agentless": agentless})
     if asset.zone_id:
         out.zone = schemas.Zone.model_validate(session.get(Zone, asset.zone_id))
     if asset.classification:
@@ -90,6 +87,8 @@ def get_asset(session: Session, registry: AdapterRegistry, asset_id: str) -> sch
     last = session.scalar(select(ProbeRun.id).where(ProbeRun.asset_id == asset.id)
                           .order_by(ProbeRun.created_at.desc()).limit(1))
     out.last_probe_id = last
+    out.maintenance_window_required = asset.eligibility == "REVIEW_REQUIRED"
+    out.current_agent_id = asset.current_agent_id
     reach = eff.get("reachability.icmp")
     if reach is not None and reach.value in ("BLOCKED", "TIMEOUT"):
         out.notes.append("No ICMP reply does not mean the device is offline."

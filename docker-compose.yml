@@ -16,9 +16,10 @@ services:
       ASSESSMENT_INTERVAL_SEC: ${ASSESSMENT_INTERVAL_SEC:-300}
       DATABASE_URL: sqlite:////data/otprobe.db
       ADAPTER_MODE: simulated
-      JWT_SECRET: ${JWT_SECRET:-change-me-jwt-secret}
+      JWT_SECRET: ${JWT_SECRET:-change-me-demo-jwt-secret-at-least-32-bytes}
       VAULT_KEY: ${VAULT_KEY:-}
       RULES_DIR: /app/rules
+      AGENT_SERVER_URL: http://api:8000
     volumes:
       - otprobe-data:/data
     ports: ["8000:8000"]
@@ -29,10 +30,12 @@ services:
       retries: 20
 
   agent-runtime:
+    # Simulated Probe Agents. Separate process; outbound HTTP to the API only (enroll, heartbeat, task polling).
     build: { context: ., dockerfile: agent/Dockerfile }
     environment:
       <<: *sim-env
       OTPROBE_API_URL: http://api:8000
+      RUNTIME_POLL_SEC: "2"
     depends_on: { api: { condition: service_healthy } }
     restart: unless-stopped
 

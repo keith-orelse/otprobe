@@ -39,3 +39,15 @@ name = "Simulated adapters do not depend on business code"
 type = "forbidden"
 source_modules = ["app.adapters.simulated"]
 forbidden_modules = ["app.api", "app.services", "app.engines"]
+
+[[tool.importlinter.contracts]]
+name = "Services and engines never depend on the API layer"
+type = "forbidden"
+source_modules = ["app.services", "app.engines"]
+forbidden_modules = ["app.api"]
+
+[[tool.importlinter.contracts]]
+name = "Simulator-facing /sim API never touches business services"
+type = "forbidden"
+source_modules = ["app.api.sim"]
+forbidden_modules = ["app.services", "app.engines"]

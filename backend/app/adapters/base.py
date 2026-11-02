@@ -191,6 +191,7 @@ class RemoteOperation(str, enum.Enum):
     QUERY_SERVICE = "QUERY_SERVICE"
     QUERY_REBOOT_PENDING = "QUERY_REBOOT_PENDING"
     QUERY_AGENT_INSTALLED = "QUERY_AGENT_INSTALLED"
+    QUERY_SERVER_CONNECTIVITY = "QUERY_SERVER_CONNECTIVITY"  # Test-NetConnection <server> -Port 443
     VERIFY_FILE_HASH = "VERIFY_FILE_HASH"
     INSTALL_AGENT = "INSTALL_AGENT"
     WRITE_ENROLLMENT_BUNDLE = "WRITE_ENROLLMENT_BUNDLE"
@@ -288,3 +289,17 @@ class CredentialVault(abc.ABC):
 
     @abc.abstractmethod
     async def list_profiles(self) -> list[MaskedCredential]: ...
+
+
+class SimulationControl(abc.ABC):
+    """Port for admin Demo Controls. Only a simulated implementation exists; a real deployment would not register
+    one, and the demo endpoints would return 404."""
+
+    @abc.abstractmethod
+    def devices(self) -> list[dict[str, Any]]: ...
+
+    @abc.abstractmethod
+    def set_fault(self, device_id: str, fault: str, params: Mapping[str, Any], set_by: str) -> None: ...
+
+    @abc.abstractmethod
+    def clear_fault(self, device_id: str, fault: str) -> None: ...

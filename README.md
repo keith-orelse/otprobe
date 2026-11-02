@@ -11,8 +11,8 @@
 | Phase | Scope | Status |
 |---|---|---|
 | 1 | Design documents, contracts, rules schema, project skeleton | Done |
-| 2 | Simulator, seed, discovery (SSE), assets, agentless probing, classification, topology | **Done, awaiting review** |
-| 3 | Auth/roles, approvals, vault, packages, precheck, deployment, enrollment, agent runtime, heartbeat | — |
+| 2 | Simulator, seed, discovery (SSE), assets, agentless probing, classification, topology | Done (approved) |
+| 3 | Auth/roles, approvals, vault, packages, precheck, deployment, enrollment, agent runtime, heartbeat | **Done, awaiting review** |
 | 4 | Assessments, rule engine, scoring, findings lifecycle, drift, comparison screen | — |
 | 5 | Demo controls, failure scenarios, rollback, MQTT telemetry, UI polish, tests, demo script | — |
 
@@ -32,14 +32,20 @@ Requires Python 3.11+ (the container uses 3.12) and Node 20+.
 cd backend && python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
 .venv/bin/uvicorn app.main:app --port 8000          # creates ./otprobe.db, runs migrations, seeds the simulated plant
 cd frontend && npm install && npm run dev           # http://localhost:5173 (proxies /api to :8000)
+cd agent && ../backend/.venv/bin/python -m otprobe_agent   # agent runtime: a SEPARATE process (needs httpx)
 ```
 
-`SPEED_FACTOR=0.3` makes the demo faster. Delete `backend/otprobe.db` to start from scratch until Reset POC arrives in Phase 5.
+Log in as one of the seeded demo users (synthetic credentials): `operator / operator-demo`,
+`approver / approver-demo`, `admin / admin-demo`.
+
+`SPEED_FACTOR=0.3` makes simulated delays faster. `HEARTBEAT_INTERVAL_SEC=2` makes agents go STALE in 6 s and OFFLINE
+in 12 s, which keeps the heartbeat demo short. Delete `backend/otprobe.db` to start from scratch until Reset POC
+arrives in Phase 5.
 
 ### Tests
 
 ```bash
-cd backend && .venv/bin/pytest            # unit, adapter contract, acceptance (A, B, C, J-partial, K)
+cd backend && .venv/bin/pytest            # unit, adapter contract, acceptance (A, B, C, D, G, J-partial, K)
 .venv/bin/ruff check app tests && .venv/bin/lint-imports   # lint + layering contracts
 ```
 
@@ -57,17 +63,62 @@ cd backend && .venv/bin/pytest            # unit, adapter contract, acceptance (
 - **Network Map**: DMZ → conduit → switch → Purdue levels, built only from what OTProbe has observed (switch
   LLDP/FDB links, WMI netstat and MQTT flows).
 - **Audit Logs**: a hash-chained audit trail with a verify button. Every action and transition carries a correlation ID.
-- **Settings**: zones, the masked credential vault and the adapter table.
+- **Settings**: zones, the masked credential vault, the package repository and the adapter table.
+
+## What works now (Phase 3)
+
+- **Login and roles**: JWT login for the three seeded users. The API enforces role checks (operator requests,
+  approver decides, admin does both and controls the demo). Every audit event names the acting user.
+  `/auth/me` returns the user's permissions, so the console never decides what a role may do.
+- **Approvals**: each approval records the requester, target, purpose, criticality, maintenance window, decision,
+  approver, timestamp and reason. **A requester can never approve their own request, admins included**
+  (`403 self-approval-forbidden`, audited as `APPROVAL_SELF_DENIED`). Critical assets (scada-01) need a maintenance
+  window and an approval reason.
+- **Package repository**: Probe Agent 1.0.0 (DEPRECATED) and 1.1.0 (ACTIVE), each with a real SHA-256, size,
+  architecture, supported OS list and creation date.
+- **Precheck**: nine checks, each PASS/FAIL/WARN with a detail line: reachable, hostname verified, WinRM available,
+  authentication, package compatible, disk space, existing agent, server connectivity, reboot. DEPLOY AGENT stays
+  disabled until precheck passes, and a pass is valid for 30 minutes.
+- **Deployment**: connect → WinRM session → retrieve credential (mint the enrollment token) → transfer package (with
+  %) → verify hash → install → service created → start → await enrollment. Every step is visible live.
+- **Enrollment and agent trust**: the enrollment token is single-use, has a 15-minute TTL, is stored hashed and is
+  bound to the asset and deployment. `POST /agents/enroll` exchanges it for a per-agent bearer credential, which is
+  also stored hashed and shown once. Heartbeat and task polling require that credential.
+- **Agent runtime**: `agent/otprobe_agent`, a separate process (its own container in Compose). It starts an agent for
+  every virtual host where the installer ran. Each agent enrolls, heartbeats and long-polls for tasks **over
+  outbound HTTP only**; the server never connects to it.
+- **Heartbeat watchdog**: an agent goes STALE after 3 missed heartbeats and OFFLINE after 6, and returns to ONLINE on
+  the next heartbeat. The Agents screen shows "Last heartbeat: N seconds ago".
+- **State machines** (section 8): deployment, agent, approval and removal transitions are validated and audited.
+  Removal is declared now; the rollback workflow that uses it arrives in Phase 5.
+- **SIMULATION CONTROLS** (admin, partial): device faults for testing this phase: `heartbeat_blocked`,
+  `agent_crashed`, WinRM failures, `package_checksum_mismatch`, `install_failure`, `enrollment_failure` and others.
+
+## How to test acceptance criteria D and G
+
+**Automated** (the agent runtime is spawned as a real subprocess; the API is served over loopback HTTP):
+
+```bash
+cd backend && .venv/bin/pytest tests/acceptance/test_d_deployment.py tests/acceptance/test_g_heartbeat.py -v
+```
+
+**Scripted through the real API** (needs a running API and agent runtime):
+
+```bash
+API=http://127.0.0.1:8000 ./scripts/try_d_g.sh
+```
+
+**By hand in the console**: see [docs/TESTING_D_G.md](docs/TESTING_D_G.md).
 
 ### Known gaps, scheduled for later phases
 
 | Gap | Phase |
 |---|---|
-| No login yet. Actions are attributed to `anonymous`, and the SSE stream needs no ticket | 3 |
-| WinRM operations that change state (install/uninstall) raise `NotImplementedError` | 3 |
+| Agents poll for tasks, but no tasks exist yet. Deep assessments, the rule engine and findings arrive then | 4 |
 | Rogue devices raise an audit event and an asset flag, but not yet the `NET-ROGUE-001` finding | 4 |
-| Demo Controls UI. Faults can be injected from tests through the simulator only | 5 |
-| The Deployments, Approvals, Agents, Assessments, Findings, MQTT Telemetry and Demo Controls screens are placeholders | 3–5 |
+| Remove agent / rollback, the "restart agent service" action, and the full failure matrix with UI messages | 5 |
+| Full Demo Controls (configuration drift, telemetry, rogue injection, Reset POC) | 5 |
+| The Assessments, Findings and MQTT Telemetry screens are placeholders | 4–5 |
 
 ## Repository layout
 
@@ -143,3 +194,15 @@ Phase 2 went ahead with these defaults.
 | N3 | Agentless software visibility | `RemoteTool Demo` is a **per-user** install, so agentless WMI (machine-scope Uninstall keys) does not see it; only the deep agent will. **Proposal for Phase 4:** make `WIN-SW-001` `DEEP_AGENT`-only, so agentless never reports a false PASS |
 | N4 | Classification confidence | eng-ws-01 scores **91%**. The unmatched signal is "Dual-homed (L2 + L1 interfaces)". Confidences and evidence come entirely from `rules/classification.yaml` |
 | N5 | Unprobed Windows hosts | After discovery alone, Windows hosts are unclassified with eligibility `UNKNOWN`. This follows the provenance matrix: discovery yields no OS data |
+
+## Phase 3 notes for review
+
+| # | Topic | What was done |
+|---|---|---|
+| N6 | "Retrieve credential" step | The installer credential is fetched from the vault when the WinRM session opens (and audited as `CREDENTIAL_RETRIEVED`). The `RETRIEVE_CREDENTIAL` step mints the agent's enrollment credential: the single-use token that the installer writes into the agent's enrollment bundle |
+| N7 | Enrollment idempotency | `POST /agents/enroll` does not store an idempotency record, because that would persist the plaintext credential. The single-use token makes the call idempotent: a replay returns `401 Enrollment token already used` |
+| N8 | Enrollment failure | The simulated fault makes the agent present a tampered token. It is rejected (`ENROLLMENT_TOKEN_REJECTED`), and the deployment goes `FAILED / ENROLLMENT_FAILED` when `ENROLLMENT_TIMEOUT_SEC` (default 120 s) expires, leaving the agent in `ERROR` |
+| N9 | Simulator token | One shared `SIM_SERVICE_TOKEN` guards `/sim/v1` (not scoped per host). This is a deliberate simplification: `/sim` stands in for each host's own disk |
+| N10 | Approval reason | A reason is required to reject, and to approve a deployment to a CRITICAL asset |
+| N11 | Who runs precheck and deploy | The requester (operator) or an admin. Approvers only decide |
+| N12 | Bug fixed | List filters sent in camelCase (`entityId`, `correlationId`, `assetId`) were silently ignored. They now work, with a regression test |

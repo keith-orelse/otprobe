@@ -2,12 +2,12 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import select
 
 from app import schemas
-from app.api.deps import get_ctx
+from app.api.deps import any_user, get_ctx
 from app.context import AppContext
 from app.models import Zone
 from app.services import topology
 
-router = APIRouter(tags=["topology"])
+router = APIRouter(tags=["topology"], dependencies=[Depends(any_user)])
 
 
 @router.get("/topology", response_model=schemas.Topology)

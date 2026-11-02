@@ -1,11 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
 import { apiGet } from "../api";
 import { Panel, Pill } from "../components/ui";
-import type { DashboardSummary, VaultProfile, Zone } from "../types";
+import type { DashboardSummary, Package, VaultProfile, Zone } from "../types";
 
 export function Settings() {
   const zones = useQuery({ queryKey: ["zones"], queryFn: () => apiGet<Zone[]>("/zones") });
   const vault = useQuery({ queryKey: ["vault"], queryFn: () => apiGet<VaultProfile[]>("/vault/profiles") });
+  const packages = useQuery({ queryKey: ["packages"], queryFn: () => apiGet<Package[]>("/packages") });
   const dash = useQuery({ queryKey: ["dashboard"], queryFn: () => apiGet<DashboardSummary>("/dashboard/summary") });
   return (
     <div className="page">
@@ -25,6 +26,16 @@ export function Settings() {
           <tbody>{vault.data?.map((p) => (
             <tr key={p.name}><td className="mono">{p.name}</td><td>{p.protocol}</td><td className="mono">{p.username}</td>
               <td className="mono">{p.secret}</td></tr>))}
+          </tbody></table>
+      </Panel>
+      <Panel title="Package repository (simulated transfer, real metadata and SHA-256)">
+        <table className="dense"><thead><tr><th>Package</th><th>Version</th><th>Arch</th><th>Status</th><th>SHA-256</th>
+          <th className="num">Size</th><th>Supported OS</th><th>Created</th></tr></thead>
+          <tbody>{packages.data?.map((p) => (
+            <tr key={p.id}><td>{p.name}</td><td>{p.version}</td><td>{p.architecture}</td><td><Pill value={p.status === "ACTIVE" ? "OK" : "WARNING"} title={p.status} />{p.status}</td>
+              <td className="mono small" title={p.sha256}>{p.sha256.slice(0, 16)}…</td>
+              <td className="num">{(p.sizeBytes / 1_048_576).toFixed(1)} MB</td><td>{p.supportedOs.join(", ")}</td>
+              <td>{new Date(p.createdAt).toLocaleDateString()}</td></tr>))}
           </tbody></table>
       </Panel>
       <Panel title="Protocol adapters">

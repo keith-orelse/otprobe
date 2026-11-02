@@ -70,4 +70,65 @@ PROBE = StateMachine(
     },
 )
 
-MACHINES = {m.entity_kind: m for m in (DISCOVERY, PROBE)}
+DEPLOYMENT = StateMachine(
+    "Deployment", "deployment", "REQUESTED", "DEPLOYMENT_REQUESTED",
+    {
+        ("REQUESTED", "PENDING_APPROVAL"): "DEPLOYMENT_SUBMITTED",
+        ("PENDING_APPROVAL", "APPROVED"): "DEPLOYMENT_APPROVED",
+        ("PENDING_APPROVAL", "REJECTED"): "DEPLOYMENT_REJECTED",
+        ("APPROVED", "PRECHECK_RUNNING"): "PRECHECK_STARTED",
+        ("PRECHECK_RUNNING", "PRECHECK_PASSED"): "PRECHECK_PASSED",
+        ("PRECHECK_RUNNING", "PRECHECK_FAILED"): "PRECHECK_FAILED",
+        ("PRECHECK_FAILED", "PRECHECK_RUNNING"): "PRECHECK_RETRIED",
+        ("PRECHECK_PASSED", "PRECHECK_RUNNING"): "PRECHECK_RETRIED",
+        ("PRECHECK_PASSED", "DEPLOYING"): "DEPLOYMENT_STARTED",
+        ("DEPLOYING", "ENROLLING"): "AGENT_INSTALLED",
+        ("DEPLOYING", "FAILED"): "DEPLOYMENT_FAILED",
+        ("ENROLLING", "COMPLETED"): "DEPLOYMENT_COMPLETED",
+        ("ENROLLING", "FAILED"): "DEPLOYMENT_FAILED",
+    },
+)
+
+# NOT_INSTALLED is the implicit state of an asset without an active agent row (docs/STATE_MACHINES §3);
+# an agents row is created when the INSTALL step succeeds, starting in ENROLLING.
+AGENT = StateMachine(
+    "Agent", "agent", "ENROLLING", "AGENT_REGISTERED",
+    {
+        ("ENROLLING", "ONLINE"): "AGENT_ENROLLED",
+        ("ENROLLING", "ERROR"): "AGENT_ENROLLMENT_FAILED",
+        ("ONLINE", "STALE"): "AGENT_STALE",
+        ("STALE", "OFFLINE"): "AGENT_OFFLINE",
+        ("STALE", "ONLINE"): "AGENT_RECOVERED",
+        ("OFFLINE", "ONLINE"): "AGENT_RECOVERED",
+        ("ONLINE", "REMOVING"): "AGENT_REMOVAL_STARTED",
+        ("STALE", "REMOVING"): "AGENT_REMOVAL_STARTED",
+        ("OFFLINE", "REMOVING"): "AGENT_REMOVAL_STARTED",
+        ("ERROR", "REMOVING"): "AGENT_REMOVAL_STARTED",
+        ("REMOVING", "REMOVED"): "AGENT_REMOVED",
+        ("REMOVING", "ERROR"): "AGENT_ERROR",
+    },
+)
+
+APPROVAL = StateMachine(
+    "Approval", "approval", "PENDING", "APPROVAL_REQUESTED",
+    {
+        ("PENDING", "APPROVED"): "APPROVAL_GRANTED",
+        ("PENDING", "REJECTED"): "APPROVAL_DENIED",
+        ("PENDING", "EXPIRED"): "APPROVAL_EXPIRED",
+    },
+)
+
+# Declared now (section 8); the rollback workflow that drives it is Phase 5.
+REMOVAL = StateMachine(
+    "Removal", "removal", "REQUESTED", "REMOVAL_REQUESTED",
+    {
+        ("REQUESTED", "APPROVED"): "REMOVAL_APPROVED",
+        ("REQUESTED", "REJECTED"): "REMOVAL_REJECTED",
+        ("APPROVED", "RUNNING"): "REMOVAL_STARTED",
+        ("RUNNING", "COMPLETED"): "ROLLBACK_COMPLETED",
+        ("RUNNING", "FAILED"): "ROLLBACK_FAILED",
+        ("FAILED", "RUNNING"): "REMOVAL_RETRIED",
+    },
+)
+
+MACHINES = {m.entity_kind: m for m in (DISCOVERY, PROBE, DEPLOYMENT, AGENT, APPROVAL, REMOVAL)}

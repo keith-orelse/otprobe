@@ -15,6 +15,19 @@ EXPECTED = {
                   ("RUNNING", "CANCELLED")},
     "probe": {("QUEUED", "RUNNING"), ("QUEUED", "FAILED"), ("RUNNING", "COMPLETED"), ("RUNNING", "PARTIAL"),
               ("RUNNING", "FAILED")},
+    "deployment": {("REQUESTED", "PENDING_APPROVAL"), ("PENDING_APPROVAL", "APPROVED"),
+                   ("PENDING_APPROVAL", "REJECTED"),
+                   ("APPROVED", "PRECHECK_RUNNING"), ("PRECHECK_RUNNING", "PRECHECK_PASSED"),
+                   ("PRECHECK_RUNNING", "PRECHECK_FAILED"), ("PRECHECK_FAILED", "PRECHECK_RUNNING"),
+                   ("PRECHECK_PASSED", "PRECHECK_RUNNING"), ("PRECHECK_PASSED", "DEPLOYING"),
+                   ("DEPLOYING", "ENROLLING"), ("DEPLOYING", "FAILED"), ("ENROLLING", "COMPLETED"),
+                   ("ENROLLING", "FAILED")},
+    "agent": {("ENROLLING", "ONLINE"), ("ENROLLING", "ERROR"), ("ONLINE", "STALE"), ("STALE", "OFFLINE"),
+              ("STALE", "ONLINE"), ("OFFLINE", "ONLINE"), ("ONLINE", "REMOVING"), ("STALE", "REMOVING"),
+              ("OFFLINE", "REMOVING"), ("ERROR", "REMOVING"), ("REMOVING", "REMOVED"), ("REMOVING", "ERROR")},
+    "approval": {("PENDING", "APPROVED"), ("PENDING", "REJECTED"), ("PENDING", "EXPIRED")},
+    "removal": {("REQUESTED", "APPROVED"), ("REQUESTED", "REJECTED"), ("APPROVED", "RUNNING"), ("RUNNING", "COMPLETED"),
+                ("RUNNING", "FAILED"), ("FAILED", "RUNNING")},
 }
 
 

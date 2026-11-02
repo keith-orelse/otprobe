@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import text
 
 from app import schemas
-from app.api.deps import get_ctx
+from app.api.deps import any_user, get_ctx
 from app.context import AppContext
 from app.services import dashboard
 
@@ -18,6 +18,6 @@ async def health(ctx: AppContext = Depends(get_ctx)) -> dict:
 
 
 @router.get("/dashboard/summary", response_model=schemas.DashboardSummary)
-async def summary(ctx: AppContext = Depends(get_ctx)):
+async def summary(ctx: AppContext = Depends(get_ctx), user=Depends(any_user)):
     with ctx.db.session() as s:
         return dashboard.summary(s, ctx.registry)

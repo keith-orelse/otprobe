@@ -1,10 +1,10 @@
 from fastapi import APIRouter, Depends
 
 from app import schemas
-from app.api.deps import get_ctx
+from app.api.deps import any_user, get_ctx
 from app.context import AppContext
 
-router = APIRouter(prefix="/vault", tags=["vault"])
+router = APIRouter(prefix="/vault", tags=["vault"], dependencies=[Depends(any_user)])
 
 
 @router.get("/profiles", response_model=list[schemas.VaultProfile], summary="Credential profiles (always masked)")

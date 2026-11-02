@@ -39,7 +39,8 @@ export interface Relationship { kind: string; direction: string; peerAssetId: st
 
 export interface AssetDetail extends AssetSummary { zone: Zone | null; classification: Classification | null;
   groups: Record<string, FieldValue[]>; relationships: Relationship[]; deployAgent: ActionState;
-  agentless: ActionState; lastProbeId: string | null; notes: string[] }
+  agentless: ActionState; lastProbeId: string | null; maintenanceWindowRequired: boolean;
+  currentAgentId: string | null; notes: string[] }
 
 export interface ProbeResult { protocol: string; status: string; data: Record<string, any>;
   stages: { name: string; status: string; detail: string; at: string | null }[]; latencyMs: number | null;
@@ -69,3 +70,37 @@ export interface DashboardSummary { assets: Record<string, number>; assetsByLeve
 
 export interface SseEvent { id: number; type: string; ts: string; correlationId: string | null;
   entity: { kind: string; id: string | null }; data: Record<string, any> }
+
+export interface User { id: string; username: string; displayName: string; role: string; permissions: string[] }
+
+export interface Package { id: string; name: string; version: string; architecture: string; sha256: string;
+  sizeBytes: number; supportedOs: string[]; status: string; releaseNotes: string; createdAt: string }
+
+export interface MaintenanceWindow { start: string; end: string }
+
+export interface Approval { id: string; subjectKind: string; subjectId: string; targetAssetId: string;
+  targetName: string | null; requestedBy: string; purpose: string; criticality: string | null;
+  maintenanceWindow: MaintenanceWindow | null; status: string; decidedBy: string | null; decidedAt: string | null;
+  reason: string | null; createdAt: string; actions: Record<string, ActionState> }
+
+export interface PrecheckResult { runNo: number; seq: number; check: string; status: string; detail: string;
+  checkedAt: string }
+
+export interface Deployment { id: string; assetId: string; assetName: string | null; package: Package | null;
+  credentialProfile: string; status: string; purpose: string; requestedBy: string; approval: Approval | null;
+  precheckRunNo: number; precheckPassedAt: string | null; precheck: PrecheckResult[]; steps: WorkflowStep[];
+  agentId: string | null; failureCode: string | null; failureDetail: string | null; retryOfId: string | null;
+  correlationId: string; createdAt: string; deployStartedAt: string | null; enrollingSince: string | null;
+  finishedAt: string | null; actions: Record<string, ActionState> }
+
+export interface Agent { id: string; assetId: string; assetName: string | null; deploymentId: string; status: string;
+  version: string; credentialPrefix: string | null; installedAt: string; enrolledAt: string | null;
+  lastHeartbeatAt: string | null; secondsSinceHeartbeat: number | null; missedHeartbeats: number;
+  heartbeatIntervalSec: number; revokedAt: string | null; removedAt: string | null }
+
+export interface HeartbeatRecord { seq: number; receivedAt: string; agentTime: string | null;
+  payload: Record<string, any> }
+
+export interface DemoDevice { deviceId: string; ip: string; hostname: string; type: string; level: string;
+  powered: boolean; online: boolean; agentInstalled: boolean; faults: string[] }
+export interface DemoState { devices: DemoDevice[]; availableFaults: Record<string, string> }

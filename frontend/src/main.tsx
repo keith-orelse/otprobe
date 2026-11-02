@@ -3,11 +3,16 @@ import ReactDOM from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { Layout, NAV } from "./components/Layout";
+import { AgentDetail, Agents } from "./pages/Agents";
+import { Approvals } from "./pages/Approvals";
 import { AssetDetail } from "./pages/AssetDetail";
 import { Assets } from "./pages/Assets";
 import { AuditLogs } from "./pages/AuditLogs";
 import { Dashboard } from "./pages/Dashboard";
+import { DemoControls } from "./pages/DemoControls";
+import { DeploymentDetail, Deployments } from "./pages/Deployments";
 import { Discovery } from "./pages/Discovery";
+import { Login } from "./pages/Login";
 import { NetworkMap } from "./pages/NetworkMap";
 import { Pending } from "./pages/Pending";
 import { Probes } from "./pages/Probes";
@@ -21,6 +26,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
         <Routes>
+          <Route path="login" element={<Login />} />
           <Route element={<Layout />}>
             <Route index element={<Dashboard />} />
             <Route path="network-map" element={<NetworkMap />} />
@@ -30,6 +36,12 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             <Route path="probes" element={<Probes />} />
             <Route path="audit" element={<AuditLogs />} />
             <Route path="settings" element={<Settings />} />
+            <Route path="deployments" element={<Deployments />} />
+            <Route path="deployments/:id" element={<DeploymentDetail />} />
+            <Route path="approvals" element={<Approvals />} />
+            <Route path="agents" element={<Agents />} />
+            <Route path="agents/:id" element={<AgentDetail />} />
+            <Route path="demo" element={<DemoControls />} />
             {NAV.filter((n) => n.phase).map((n) => <Route key={n.to} path={n.to.slice(1)} element={<Pending />} />)}
           </Route>
         </Routes>

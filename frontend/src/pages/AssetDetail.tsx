@@ -1,12 +1,14 @@
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { apiAction, apiGet } from "../api";
 import { ago, ErrorBox, Panel, Pill, SourceBadge, StepList, time, Value } from "../components/ui";
-import type { AssetDetail as Asset, ProbeRun } from "../types";
+import type { Agent, AssetDetail as Asset, Deployment, Package, ProbeRun } from "../types";
 
 export function AssetDetail() {
   const { id = "" } = useParams();
   const qc = useQueryClient();
+  const [requesting, setRequesting] = useState(false);
   const asset = useQuery({ queryKey: ["asset", id], queryFn: () => apiGet<Asset>(`/assets/${id}`) });
   const probeId = asset.data?.lastProbeId;
   const probe = useQuery({ queryKey: ["probes", probeId], enabled: !!probeId,
@@ -35,12 +37,15 @@ export function AssetDetail() {
           <button className="btn btn-primary" disabled={!a.agentless.enabled || run.isPending} title={a.agentless.reason}
             onClick={() => run.mutate()}>RUN AGENTLESS PROBE</button>
           <div className="action-with-reason">
-            <button className="btn" disabled={!a.deployAgent.enabled} title={a.deployAgent.reason}>DEPLOY AGENT</button>
-            {!a.deployAgent.enabled && <div className="reason">{a.deployAgent.reason}</div>}
+            <button className="btn" disabled={!a.deployAgent.enabled} title={a.deployAgent.reason}
+              onClick={() => setRequesting(true)}>DEPLOY AGENT</button>
+            <div className={a.deployAgent.enabled ? "reason reason-ok" : "reason"}>{a.deployAgent.reason}</div>
           </div>
         </div>
       </div>
       <ErrorBox error={run.error} />
+      {requesting && <DeployRequest asset={a} onClose={() => setRequesting(false)} />}
+      {a.currentAgentId && <AgentStrip id={a.currentAgentId} />}
       {a.notes.map((n) => <div key={n} className="note">{n}</div>)}
 
       <div className="grid-3">
@@ -100,6 +105,70 @@ export function AssetDetail() {
             </tbody></table>
         </Panel>
       )}
+    </div>
+  );
+}
+
+function isoLocal(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function DeployRequest({ asset, onClose }: { asset: Asset; onClose: () => void }) {
+  const nav = useNavigate();
+  const packages = useQuery({ queryKey: ["packages"], queryFn: () => apiGet<Package[]>("/packages") });
+  const [pkg, setPkg] = useState("");
+  const [purpose, setPurpose] = useState("Deep compliance monitoring");
+  const [useWindow, setUseWindow] = useState(asset.maintenanceWindowRequired);
+  const [start, setStart] = useState(isoLocal(new Date()));
+  const [end, setEnd] = useState(isoLocal(new Date(Date.now() + 2 * 3600_000)));
+  const active = (packages.data ?? []).filter((p) => p.status === "ACTIVE");
+  const selected = pkg || active[0]?.id || "";
+  const submit = useMutation({
+    mutationFn: () => apiAction<Deployment>("/deployments", {
+      assetId: asset.id, packageId: selected, purpose,
+      maintenanceWindow: useWindow ? { start: new Date(start).toISOString(), end: new Date(end).toISOString() } : null,
+    }),
+    onSuccess: (d) => nav(`/deployments/${d.id}`),
+  });
+  return (
+    <Panel title={`Request agent deployment · ${asset.displayName}`} actions={<button className="btn btn-sm" onClick={onClose}>Close</button>}>
+      <div className="form-grid">
+        <label>Package
+          <select value={selected} onChange={(e) => setPkg(e.target.value)}>
+            {packages.data?.map((p) => (
+              <option key={p.id} value={p.id} disabled={p.status !== "ACTIVE"}>
+                {p.name} {p.version} ({p.architecture}) · {p.status}</option>))}
+          </select>
+        </label>
+        <label>Credential profile<input value="OT-WINDOWS-INSTALLER" disabled /></label>
+        <label className="wide">Purpose<input value={purpose} onChange={(e) => setPurpose(e.target.value)} /></label>
+        <label className="check"><input type="checkbox" checked={useWindow} disabled={asset.maintenanceWindowRequired}
+          onChange={(e) => setUseWindow(e.target.checked)} />Maintenance window
+          {asset.maintenanceWindowRequired && <span className="pill pill-warn">REQUIRED</span>}</label>
+        {useWindow && <>
+          <label>Start<input type="datetime-local" value={start} onChange={(e) => setStart(e.target.value)} /></label>
+          <label>End<input type="datetime-local" value={end} onChange={(e) => setEnd(e.target.value)} /></label>
+        </>}
+      </div>
+      <button className="btn btn-primary" disabled={!selected || submit.isPending} onClick={() => submit.mutate()}>
+        SUBMIT FOR APPROVAL</button>
+      <p className="hint">The request needs an approver who is not you. Precheck and deployment run after approval.</p>
+      <ErrorBox error={submit.error} />
+    </Panel>
+  );
+}
+
+function AgentStrip({ id }: { id: string }) {
+  const agent = useQuery({ queryKey: ["agents", id], queryFn: () => apiGet<Agent>(`/agents/${id}`), refetchInterval: 2000 });
+  const a = agent.data;
+  if (!a) return null;
+  return (
+    <div className="agent-strip">
+      <span>Probe Agent <b className="mono">{a.id.slice(0, 8)}</b> v{a.version}</span>
+      <Pill value={a.status} />
+      <span>Last heartbeat: {a.secondsSinceHeartbeat == null ? "—" : `${a.secondsSinceHeartbeat} seconds ago`}</span>
+      <Link to={`/agents/${a.id}`}>agent →</Link>
     </div>
   );
 }

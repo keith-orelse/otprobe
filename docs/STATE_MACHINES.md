@@ -102,6 +102,8 @@ stateDiagram-v2
   REMOVED --> [*]
 ```
 
+- The agent row is created by `AGENT_REGISTERED` when INSTALL succeeds. `AGENT_INSTALLED` is the deployment's
+  DEPLOYING → ENROLLING event.
 - `NOT_INSTALLED` is the **implicit** state of an asset that has no active agent row (`assets.agent_state`).
   An `agents` row is created when the INSTALL step succeeds, starting in `ENROLLING`. Because of this, a failed
   install leaves nothing behind ("nothing installed").

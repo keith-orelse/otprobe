@@ -66,6 +66,7 @@ async def test_audit_chain_and_correlation(discovered):
                             headers={"Idempotency-Key": "p", "X-Correlation-ID": "corr-probe-1"})
     await h.idle()
     events = (await h.get("/audit-events", params={"correlationId": "corr-probe-1", "limit": 100}))["items"]
+    assert events and all(e["correlationId"] == "corr-probe-1" for e in events)
     actions = {e["action"] for e in events}
     assert {"PROBE_REQUESTED", "PROBE_STARTED", "CREDENTIAL_RETRIEVED", "ASSET_CLASSIFIED",
             "PROBE_COMPLETED"} <= actions
@@ -104,3 +105,16 @@ async def test_ui_decisions_are_server_computed(discovered):
     assert [z["order"] for z in zones] == list(range(len(zones)))
     tiers = {n["ip"]: n["tier"] for n in topo["nodes"] if n["kind"] == "asset"}
     assert tiers["192.168.20.1"] == "infrastructure" and tiers["192.168.20.13"] == "host"
+
+
+async def test_camelcase_list_filters_are_applied(discovered):
+    """Regression: snake_case query params silently ignored camelCase filters."""
+    h = discovered
+    await h.probe("192.168.20.1")
+    plc = await h.asset_by_ip("192.168.10.10")
+    await h.probe("192.168.10.10")
+    runs = (await h.get("/probes", params={"assetId": plc["id"]}))["items"]
+    assert len(runs) == 1 and runs[0]["assetId"] == plc["id"]
+    assert (await h.get("/deployments", params={"assetId": plc["id"]}))["total"] == 0
+    ev = (await h.get("/audit-events", params={"entityId": plc["id"], "limit": 200}))["items"]
+    assert ev and all(e["entityId"] == plc["id"] for e in ev)

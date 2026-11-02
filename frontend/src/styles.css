@@ -169,3 +169,21 @@ details.result summary { cursor: pointer; }
 .map { height: calc(100vh - 210px); min-height: 520px; background: #0b0f13; border: 1px solid var(--line); }
 .legend { display: flex; gap: 12px; color: var(--muted); font-size: 11px; }
 .legend i { display: inline-block; width: 10px; height: 10px; border: 2px solid; border-radius: 50%; margin-right: 4px; vertical-align: -1px; }
+
+/* Phase 3 */
+.login-wrap { min-height: 100%; display: flex; flex-direction: column; }
+.login { width: 380px; margin: 12vh auto 0; padding: 22px; display: flex; flex-direction: column; gap: 12px; }
+.login label, .form-grid label { display: flex; flex-direction: column; gap: 4px; color: var(--muted); font-size: 12px; }
+.login input, .form-grid input, .form-grid select, .decide input { min-width: 0; }
+.form-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px 16px; margin-bottom: 12px; align-items: end; }
+.form-grid .wide { grid-column: span 2; }
+.user-box { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; color: var(--text); }
+.nav-foot .btn { margin-bottom: 8px; }
+.reason-ok { color: var(--muted); }
+.agent-strip { display: flex; gap: 14px; align-items: center; border: 1px solid var(--line); border-left: 3px solid var(--violet);
+  background: var(--panel); padding: 6px 12px; margin-bottom: 10px; }
+.decide { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.decide input { width: 160px; }
+.fault-on { border-color: #6b2523; color: var(--fail); margin: 0 4px 4px 0; }
+input[type="password"], input[type="datetime-local"] { background: #0b0f13; border: 1px solid var(--line); color: var(--text);
+  padding: 5px 8px; font: 12px var(--sans); border-radius: 2px; }

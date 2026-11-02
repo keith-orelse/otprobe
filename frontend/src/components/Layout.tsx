@@ -1,4 +1,5 @@
-import { NavLink, Outlet } from "react-router-dom";
+import { Navigate, NavLink, Outlet } from "react-router-dom";
+import { getToken, logout, useMe } from "../auth";
 import { useServerEvents } from "../events";
 
 export const NAV: { label: string; to: string; phase?: number }[] = [
@@ -7,19 +8,25 @@ export const NAV: { label: string; to: string; phase?: number }[] = [
   { label: "Discovery", to: "/discovery" },
   { label: "Assets", to: "/assets" },
   { label: "Agentless Probing", to: "/probes" },
-  { label: "Deployments", to: "/deployments", phase: 3 },
-  { label: "Approvals", to: "/approvals", phase: 3 },
-  { label: "Agents", to: "/agents", phase: 3 },
+  { label: "Deployments", to: "/deployments" },
+  { label: "Approvals", to: "/approvals" },
+  { label: "Agents", to: "/agents" },
   { label: "Assessments", to: "/assessments", phase: 4 },
   { label: "Findings", to: "/findings", phase: 4 },
   { label: "MQTT Telemetry", to: "/telemetry", phase: 5 },
   { label: "Audit Logs", to: "/audit" },
-  { label: "Demo Controls", to: "/demo", phase: 5 },
+  { label: "Demo Controls", to: "/demo" },
   { label: "Settings", to: "/settings" },
 ];
 
 export function Layout() {
+  if (!getToken()) return <Navigate to="/login" replace />;
+  return <Shell />;
+}
+
+function Shell() {
   useServerEvents();
+  const me = useMe();
   return (
     <div className="shell">
       <div className="sim-banner" role="status">SIMULATED ENVIRONMENT - NO REAL DEVICES ARE BEING SCANNED</div>
@@ -31,7 +38,12 @@ export function Layout() {
             {n.label}{n.phase && <span className="nav-phase">P{n.phase}</span>}
           </NavLink>
         ))}
-        <div className="nav-foot muted">POC · simulated OT network</div>
+        <div className="nav-foot">
+          {me.data && <div className="user-box"><b>{me.data.displayName}</b>
+            <span className="pill pill-info">{me.data.role}</span></div>}
+          <button className="btn btn-sm" onClick={logout}>Sign out</button>
+          <div className="muted">POC · simulated OT network</div>
+        </div>
       </nav>
       <main className="main"><Outlet /></main>
     </div>

@@ -51,7 +51,7 @@ async def test_override_selects_alternative_adapter(db_path):
     app = create_app(make_settings(db_path, adapter_overrides="snmp=fake"), adapter_plugins=[plugin])
     async with app.router.lifespan_context(app):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as c:
-            h = Harness(app, c)
+            h = await Harness(app, c).login()
             await h.discover(["192.168.20.0/24"])
             switch = await h.asset_by_ip("192.168.20.1")
             assert switch["sysName"] == "fake-switch"

@@ -5,10 +5,12 @@ from __future__ import annotations
 from app.adapters.base import Protocol
 from app.adapters.registry import AdapterRegistry
 from app.adapters.simulated.arp import SimulatedArpAdapter
+from app.adapters.simulated.control import SimulatedControl
 from app.adapters.simulated.icmp import SimulatedIcmpAdapter
 from app.adapters.simulated.mqtt import SimulatedMqttAdapter
 from app.adapters.simulated.snmp import SimulatedSnmpAdapter
 from app.adapters.simulated.ssh import SimulatedSshAdapter
+from app.adapters.simulated.transfer import SimulatedPackageTransfer
 from app.adapters.simulated.vault import SimulatedCredentialVault
 from app.adapters.simulated.winrm import SimulatedWinRmAdapter
 from app.adapters.simulated.wmi import SimulatedWmiAdapter
@@ -18,6 +20,7 @@ from app.sim.world import SimWorld
 
 
 def register_simulated(registry: AdapterRegistry, world: SimWorld, latency: SimLatency, broker: Broker) -> None:
+    """Registers protocol adapters. Package transfer is built separately because it shares WinRM sessions."""
     registry.register(Protocol.ICMP, "simulated", SimulatedIcmpAdapter(world, latency))
     registry.register(Protocol.ARP, "simulated", SimulatedArpAdapter(world, latency))
     registry.register(Protocol.SNMP, "simulated", SimulatedSnmpAdapter(world, latency))
@@ -27,4 +30,9 @@ def register_simulated(registry: AdapterRegistry, world: SimWorld, latency: SimL
     registry.register(Protocol.MQTT, "simulated", SimulatedMqttAdapter(world, latency, broker))
 
 
-__all__ = ["register_simulated", "SimulatedCredentialVault"]
+def build_transfer(registry: AdapterRegistry, world: SimWorld, latency: SimLatency) -> SimulatedPackageTransfer:
+    winrm = registry.implementations(Protocol.WINRM)["simulated"]
+    return SimulatedPackageTransfer(world, latency, winrm.session_device)
+
+
+__all__ = ["register_simulated", "build_transfer", "SimulatedCredentialVault", "SimulatedControl"]
