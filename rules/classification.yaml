@@ -1,0 +1,54 @@
+# Classification signals (data, not code). confidence = matched weight / total weight for the type.
+# Conditions use the same grammar as compliance rules (docs/RULES.md). A signal whose field is missing does not match.
+# A type is only assigned when its confidence is >= min_confidence.
+min_confidence: 40
+types:
+  - type: Windows Engineering Workstation
+    default_criticality: HIGH
+    level_hint: 2
+    signals:
+      - { name: Windows OS, field: os.name, condition: "contains 'Windows' and not contains 'Server'", weight: 30 }
+      - { name: WinRM available, field: services.winrm.available, condition: "== true", weight: 15 }
+      - { name: Engineering software detected, field: "software.installed[].name", condition: "matches '(TIA Portal|Studio 5000|STEP 7|Automation Studio)'", weight: 35 }
+      - { name: Hostname pattern, field: identity.hostname, condition: "matches '^eng-?ws'", weight: 15 }
+      - { name: OT protocol client, field: "network.connections[].remote_port", condition: "intersects [102, 44818, 502]", weight: 5 }
+      - { name: Dual-homed (L2 + L1 interfaces), field: "network.interfaces", condition: "count >= 2", weight: 10 }
+
+  - type: SCADA Server
+    default_criticality: CRITICAL
+    level_hint: 2
+    signals:
+      - { name: Windows Server OS, field: os.name, condition: "contains 'Server'", weight: 30 }
+      - { name: SCADA software detected, field: "software.installed[].name", condition: "matches '(SCADA|WinCC|FactoryTalk|Ignition)'", weight: 40 }
+      - { name: Hostname pattern, field: identity.hostname, condition: "matches '^scada'", weight: 15 }
+      - { name: OPC UA listening, field: "network.listening[]", condition: "contains 4840", weight: 15 }
+
+  - type: Historian (Linux Server)
+    default_criticality: HIGH
+    level_hint: 2
+    signals:
+      - { name: Linux OS, field: os.name, condition: "matches '(Ubuntu|Linux|Debian|Red Hat)'", weight: 40 }
+      - { name: Hostname pattern, field: identity.hostname, condition: "matches '^hist'", weight: 30 }
+      - { name: SSH identity available, field: services.ssh.available, condition: "== true", weight: 30 }
+
+  - type: PLC
+    default_criticality: CRITICAL
+    level_hint: 1
+    signals:
+      - { name: PLC operating mode reported, field: plc.mode, condition: "in ['RUN', 'STOP', 'PROGRAM']", weight: 50 }
+      - { name: Controller model, field: hardware.model, condition: "matches '(S7-|ControlLogix|CompactLogix|PLC)'", weight: 30 }
+      - { name: Firmware reported, field: firmware.version, condition: "is not empty", weight: 20 }
+
+  - type: Industrial Switch
+    default_criticality: HIGH
+    level_hint: 2
+    signals:
+      - { name: Interface table, field: network.active_ports, condition: "> 0", weight: 50 }
+      - { name: Switch sysDescr, field: snmp.sys_descr, condition: "matches '(?i)switch|IMS'", weight: 50 }
+
+  - type: Sensor
+    default_criticality: MEDIUM
+    level_hint: 0
+    signals:
+      - { name: Publishes process telemetry, field: telemetry.kind, condition: "in ['temperature', 'pressure', 'flow', 'level']", weight: 70 }
+      - { name: ICMP disabled (typical field device), field: reachability.icmp, condition: "== 'BLOCKED'", weight: 30 }

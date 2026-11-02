@@ -1,0 +1,19 @@
+policy:
+  id: network-hygiene
+  name: Network Hygiene
+  version: 1.0.0
+  kind: event
+  description: Findings raised by discovery events rather than periodic evidence.
+
+rules:
+  - id: NET-ROGUE-001
+    title: Unknown device on OT network
+    severity: HIGH
+    sources: [DISCOVERY]
+    evidence: asset.authorized
+    condition: "== true"
+    expected: every device on the OT network is a known, authorized asset
+    on_fail: { status: FAIL, severity: HIGH }
+    on_missing: { status: FAIL, severity: HIGH }
+    remediation: Identify the device owner; authorize it or physically remove it.
+    references: [IEC 62443-3-3 SR 7.8, NIST SP 800-82r3 6.2.1]

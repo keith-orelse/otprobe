@@ -1,0 +1,23 @@
+# Agent eligibility policy. First matching entry wins. Evaluated after classification.
+eligibility:
+  - when: { classification.type: "== 'PLC'" }
+    result: NOT_ELIGIBLE
+    reason: Traditional PLCs are handled agentless/read-only in this POC.
+  - when: { classification.type: "in ['Sensor', 'Industrial Switch']" }
+    result: NOT_ELIGIBLE
+    reason: Embedded or network device; agentless monitoring only.
+  - when: { os.family: "== 'linux'" }
+    result: NOT_SUPPORTED
+    reason: Linux agent not supported in this POC; agentless only (SSH/SNMP).
+  - when: { os.family: "== 'windows'", asset.criticality: "== 'CRITICAL'" }
+    result: REVIEW_REQUIRED
+    reason: Critical asset; deployment requires approver review and a maintenance window.
+  - when: { os.family: "== 'windows'", services.winrm.available: "== true" }
+    result: ELIGIBLE
+    reason: Windows host with WinRM available.
+  - when: { os.family: "== 'windows'" }
+    result: NOT_ELIGIBLE
+    reason: WinRM not available; agent cannot be deployed remotely.
+  - when: {}
+    result: UNKNOWN
+    reason: Run an agentless probe to determine eligibility.

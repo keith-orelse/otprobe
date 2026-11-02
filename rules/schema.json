@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://otprobe.local/schemas/rule-file.json",
+  "title": "OTProbe rule file",
+  "type": "object",
+  "required": ["policy", "rules"],
+  "additionalProperties": false,
+  "properties": {
+    "policy": {
+      "type": "object",
+      "required": ["id", "name", "version", "kind"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9-]+$" },
+        "name": { "type": "string" },
+        "version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
+        "kind": { "enum": ["compliance", "telemetry", "event"] },
+        "description": { "type": "string" },
+        "applies_to": { "$ref": "#/$defs/selector" }
+      }
+    },
+    "parameters": {
+      "type": "object",
+      "description": "Named values referenced from conditions as $name.",
+      "additionalProperties": true
+    },
+    "rules": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/rule" }
+    }
+  },
+  "$defs": {
+    "severity": { "enum": ["CRITICAL", "HIGH", "MEDIUM", "LOW"] },
+    "selector": {
+      "type": "object",
+      "description": "Every key is an evidence/asset field path; value is a condition string. All must hold.",
+      "additionalProperties": { "type": "string" }
+    },
+    "outcome": {
+      "type": "object",
+      "required": ["status"],
+      "additionalProperties": false,
+      "properties": {
+        "status": { "enum": ["FAIL", "WARNING", "UNKNOWN"] },
+        "severity": { "$ref": "#/$defs/severity" }
+      }
+    },
+    "rule": {
+      "type": "object",
+      "required": ["id", "title", "severity", "evidence", "condition", "on_fail"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "pattern": "^[A-Z]{2,5}-[A-Z0-9]{2,8}-\\d{3}$" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "severity": { "$ref": "#/$defs/severity", "description": "Weight basis for scoring and default finding severity." },
+        "sources": {
+          "type": "array",
+          "items": { "enum": ["DEEP_AGENT", "AGENTLESS", "TELEMETRY", "DISCOVERY"] },
+          "minItems": 1,
+          "default": ["DEEP_AGENT"]
+        },
+        "applies_to": { "$ref": "#/$defs/selector" },
+        "evidence": { "type": "string", "pattern": "^[a-z_][a-z0-9_]*(\\.[a-z_][a-z0-9_]*(\\[\\])?)*$" },
+        "condition": { "type": "string", "minLength": 1 },
+        "expected": { "type": "string", "description": "Human-readable expected value shown in findings." },
+        "on_fail": { "$ref": "#/$defs/outcome" },
+        "on_missing": { "$ref": "#/$defs/outcome", "default": { "status": "UNKNOWN" } },
+        "topic": { "type": "string", "description": "telemetry rules only: MQTT topic filter" },
+        "stale_after_sec": { "type": "number", "description": "telemetry rules only: no message within N s -> on_fail" },
+        "remediation": { "type": "string" },
+        "references": { "type": "array", "items": { "type": "string" } }
+      }
+    }
+  }
+}

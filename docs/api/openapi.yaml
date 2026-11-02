@@ -1,0 +1,1077 @@
+openapi: 3.1.0
+info:
+  title: OTProbe API
+  version: 0.1.0-draft
+  summary: Simulated OT discovery, agentless probing and deep agent probing (POC)
+  description: |
+    **SIMULATED ENVIRONMENT - NO REAL DEVICES ARE BEING SCANNED.**
+
+    Phase 1 contract draft. From Phase 2 on, the served `/openapi.json` (generated from `app/schemas`) is the source
+    of truth. Endpoints that are implemented follow this draft. Pagination cursors are opaque.
+
+    Conventions: RFC 7807 errors (`application/problem+json`), `X-Correlation-ID` on every request/response,
+    `Idempotency-Key` required on action POSTs, cursor pagination (`limit`, `cursor` → `nextCursor`).
+servers:
+  - url: http://localhost:8080/api/v1
+    description: via web container proxy
+  - url: http://localhost:8000/api/v1
+    description: API container direct
+security:
+  - userJwt: []
+tags:
+  - { name: auth }
+  - { name: discovery }
+  - { name: assets }
+  - { name: probes, description: Agentless probing }
+  - { name: approvals }
+  - { name: deployments }
+  - { name: agents, description: Console-facing agent management }
+  - { name: agent-protocol, description: Called BY the agent runtime (outbound-only agents) }
+  - { name: assessments }
+  - { name: findings }
+  - { name: telemetry }
+  - { name: topology }
+  - { name: audit }
+  - { name: vault }
+  - { name: packages }
+  - { name: demo, description: SIMULATION CONTROLS (admin only) }
+  - { name: events, description: Server-Sent Events }
+
+paths:
+  /health:
+    get:
+      tags: [topology]
+      security: []
+      summary: Liveness/readiness
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              example: { status: ok, environment: SIMULATED, db: ok, adapters: { mode: simulated } }
+
+  # ---------------------------------------------------------------- auth
+  /auth/login:
+    post:
+      tags: [auth]
+      security: []
+      summary: Log in with a seeded demo user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LoginRequest" }
+            example: { username: operator, password: operator-demo }
+      responses:
+        "200":
+          description: JWT issued
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LoginResponse" }
+        "401": { $ref: "#/components/responses/Problem" }
+  /auth/me:
+    get:
+      tags: [auth]
+      summary: Current user
+      responses:
+        "200":
+          description: OK
+          content: { application/json: { schema: { $ref: "#/components/schemas/User" } } }
+  /auth/stream-ticket:
+    post:
+      tags: [auth]
+      summary: Single-use 30 s ticket for opening the SSE stream (EventSource cannot send headers)
+      responses:
+        "200":
+          description: OK
+          content: { application/json: { example: { ticket: "stk_6f1c…", expiresInSec: 30 } } }
+
+  /events/stream:
+    get:
+      tags: [events]
+      security: []
+      summary: Server-Sent Events stream
+      parameters:
+        - { name: ticket, in: query, required: true, schema: { type: string } }
+        - { name: topics, in: query, schema: { type: string }, example: "discovery,assets,deployments,agents,findings" }
+        - { name: Last-Event-ID, in: header, schema: { type: string } }
+      responses:
+        "200":
+          description: text/event-stream of `SseEvent` envelopes
+          content:
+            text/event-stream:
+              schema: { $ref: "#/components/schemas/SseEvent" }
+
+  # ---------------------------------------------------------------- dashboard / topology
+  /dashboard/summary:
+    get:
+      tags: [topology]
+      summary: Dashboard counters (assets by status, agents by state, open findings by severity, compliance, recent drift)
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/DashboardSummary" } } } }
+  /topology:
+    get:
+      tags: [topology]
+      summary: Zones, conduit, assets and observed relationships as a graph
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Topology" } } } }
+  /zones:
+    get:
+      tags: [topology]
+      summary: Configured network zones
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/Zone" } } } } }
+
+  # ---------------------------------------------------------------- discovery
+  /discovery/jobs:
+    post:
+      tags: [discovery]
+      summary: Start a discovery job (operator/admin)
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DiscoveryJobCreate" }
+            example: { targets: ["192.168.20.0/24", "192.168.10.0/24"], methods: [ARP, ICMP, SNMP] }
+      responses:
+        "202": { description: Job queued, content: { application/json: { schema: { $ref: "#/components/schemas/DiscoveryJob" } } } }
+        "422": { $ref: "#/components/responses/Problem" }
+    get:
+      tags: [discovery]
+      summary: List discovery jobs
+      parameters: [{ $ref: "#/components/parameters/Limit" }, { $ref: "#/components/parameters/Cursor" }, { name: status, in: query, schema: { $ref: "#/components/schemas/DiscoveryStatus" } }]
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/DiscoveryJobPage" } } } }
+  /discovery/jobs/{jobId}:
+    get:
+      tags: [discovery]
+      parameters: [{ $ref: "#/components/parameters/JobId" }]
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/DiscoveryJob" } } } }
+        "404": { $ref: "#/components/responses/Problem" }
+  /discovery/jobs/{jobId}/cancel:
+    post:
+      tags: [discovery]
+      parameters: [{ $ref: "#/components/parameters/JobId" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      responses:
+        "200": { description: Cancelled, content: { application/json: { schema: { $ref: "#/components/schemas/DiscoveryJob" } } } }
+        "409": { $ref: "#/components/responses/Problem" }
+  /discovery/jobs/{jobId}/observations:
+    get:
+      tags: [discovery]
+      summary: Raw per-method observations (evidence for merge-by-MAC)
+      parameters: [{ $ref: "#/components/parameters/JobId" }, { $ref: "#/components/parameters/Limit" }, { $ref: "#/components/parameters/Cursor" }]
+      responses:
+        "200": { description: OK }
+
+  # ---------------------------------------------------------------- assets
+  /assets:
+    get:
+      tags: [assets]
+      summary: Asset inventory
+      parameters:
+        - { $ref: "#/components/parameters/Limit" }
+        - { $ref: "#/components/parameters/Cursor" }
+        - { name: level, in: query, schema: { type: string } }
+        - { name: status, in: query, schema: { type: string } }
+        - { name: agentState, in: query, schema: { $ref: "#/components/schemas/AgentStatus" } }
+        - { name: q, in: query, schema: { type: string }, description: IP/hostname/MAC search }
+        - { name: sort, in: query, schema: { type: string, example: "-lastSeen" } }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/AssetPage" } } } }
+  /assets/{assetId}:
+    get:
+      tags: [assets]
+      parameters: [{ $ref: "#/components/parameters/AssetId" }]
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/AssetDetail" } } } }
+        "404": { $ref: "#/components/responses/Problem" }
+    patch:
+      tags: [assets]
+      summary: Admin overrides (criticality)
+      parameters: [{ $ref: "#/components/parameters/AssetId" }]
+      requestBody:
+        content: { application/json: { example: { criticality: CRITICAL, reason: "Line 1 safety function" } } }
+      responses:
+        "200": { description: OK }
+        "403": { $ref: "#/components/responses/Problem" }
+  /assets/{assetId}/fields:
+    get:
+      tags: [assets]
+      summary: All field values with provenance (every source)
+      parameters: [{ $ref: "#/components/parameters/AssetId" }, { name: stage, in: query, schema: { $ref: "#/components/schemas/Stage" } }]
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/FieldValue" } } } } }
+  /assets/{assetId}/comparison:
+    get:
+      tags: [assets]
+      summary: Agentless vs Deep Agent comparison computed from collected data
+      parameters: [{ $ref: "#/components/parameters/AssetId" }]
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Comparison" } } } }
+  /assets/{assetId}/authorize:
+    post:
+      tags: [assets]
+      summary: Mark a rogue asset as authorized (admin)
+      parameters: [{ $ref: "#/components/parameters/AssetId" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody: { content: { application/json: { example: { reason: "New HMI panel, ticket CHG-1042" } } } }
+      responses:
+        "200": { description: OK }
+
+  # ---------------------------------------------------------------- probes
+  /assets/{assetId}/probes:
+    post:
+      tags: [probes]
+      summary: Run agentless probe (ICMP → ARP → WinRM → WMI / SNMP / SSH / MQTT → collect)
+      parameters: [{ $ref: "#/components/parameters/AssetId" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        content: { application/json: { example: { credentialProfiles: [OT-WINDOWS-READONLY] } } }
+      responses:
+        "202": { description: Probe queued, content: { application/json: { schema: { $ref: "#/components/schemas/ProbeRun" } } } }
+  /probes:
+    get:
+      tags: [probes]
+      parameters: [{ $ref: "#/components/parameters/Limit" }, { $ref: "#/components/parameters/Cursor" }, { name: assetId, in: query, schema: { type: string } }]
+      responses:
+        "200": { description: OK }
+  /probes/{probeId}:
+    get:
+      tags: [probes]
+      parameters: [{ name: probeId, in: path, required: true, schema: { type: string } }]
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/ProbeRun" } } } }
+
+  # ---------------------------------------------------------------- vault / packages
+  /vault/profiles:
+    get:
+      tags: [vault]
+      summary: Credential profiles (secrets always masked)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              example:
+                - { name: OT-WINDOWS-INSTALLER, protocol: WinRM, username: 'demo\agent-installer', secret: "••••••••", secretSet: true }
+                - { name: OT-WINDOWS-READONLY, protocol: WinRM, username: 'demo\otprobe-ro', secret: "••••••••", secretSet: true }
+  /packages:
+    get:
+      tags: [packages]
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/Package" } } } } }
+
+  # ---------------------------------------------------------------- deployments & approvals
+  /deployments:
+    post:
+      tags: [deployments]
+      summary: Request agent deployment (operator/admin). Creates a PENDING approval.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DeploymentCreate" }
+            example:
+              assetId: 0192f0a0-7c1e-7d40-9a51-0c3b2f1e0013
+              packageId: pkg-probe-agent-1.1.0
+              credentialProfile: OT-WINDOWS-INSTALLER
+              purpose: Deep compliance monitoring for engineering workstation
+              maintenanceWindow: { start: "2026-11-02T18:00:00Z", end: "2026-11-02T20:00:00Z" }
+      responses:
+        "201": { description: Created, content: { application/json: { schema: { $ref: "#/components/schemas/Deployment" } } } }
+        "422":
+          description: Not eligible
+          content:
+            application/problem+json:
+              example:
+                type: https://otprobe.local/problems/asset-not-eligible
+                title: Asset not eligible for agent deployment
+                status: 422
+                detail: Traditional PLCs are handled agentless/read-only in this POC.
+                correlationId: 0192f0a1-0b2c-7e11-8c5d-5f2d9a1b7c33
+    get:
+      tags: [deployments]
+      parameters: [{ $ref: "#/components/parameters/Limit" }, { $ref: "#/components/parameters/Cursor" }, { name: status, in: query, schema: { $ref: "#/components/schemas/DeploymentStatus" } }]
+      responses:
+        "200": { description: OK }
+  /deployments/{deploymentId}:
+    get:
+      tags: [deployments]
+      summary: Deployment with approval, precheck results and live steps
+      parameters: [{ $ref: "#/components/parameters/DeploymentId" }]
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Deployment" } } } }
+  /deployments/{deploymentId}/precheck:
+    post:
+      tags: [deployments]
+      summary: Run (or re-run) precheck. Allowed from APPROVED, PRECHECK_FAILED, PRECHECK_PASSED.
+      parameters: [{ $ref: "#/components/parameters/DeploymentId" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      responses:
+        "202": { description: Precheck started }
+        "409": { $ref: "#/components/responses/Problem" }
+  /deployments/{deploymentId}/deploy:
+    post:
+      tags: [deployments]
+      summary: Start deployment. Only from PRECHECK_PASSED (precheck < 30 min old, inside maintenance window).
+      parameters: [{ $ref: "#/components/parameters/DeploymentId" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      responses:
+        "202": { description: Deployment started }
+        "409":
+          description: Invalid transition
+          content:
+            application/problem+json:
+              example:
+                type: https://otprobe.local/problems/invalid-state-transition
+                title: Invalid state transition
+                status: 409
+                detail: Deployment cannot go from PENDING_APPROVAL to DEPLOYING
+                correlationId: 0192f0a1-0b2c-7e11-8c5d-5f2d9a1b7c34
+  /deployments/{deploymentId}/retry:
+    post:
+      tags: [deployments]
+      summary: Create a new deployment request from a FAILED one (retry_of_id set; requires approval)
+      parameters: [{ $ref: "#/components/parameters/DeploymentId" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      responses:
+        "201": { description: New deployment created }
+  /approvals:
+    get:
+      tags: [approvals]
+      parameters: [{ $ref: "#/components/parameters/Limit" }, { $ref: "#/components/parameters/Cursor" }, { name: decision, in: query, schema: { enum: [PENDING, APPROVED, REJECTED, EXPIRED] } }]
+      responses:
+        "200": { description: OK }
+  /approvals/{approvalId}/approve:
+    post:
+      tags: [approvals]
+      summary: Approve (approver/admin; never your own request)
+      parameters: [{ $ref: "#/components/parameters/ApprovalId" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody: { content: { application/json: { schema: { $ref: "#/components/schemas/Decision" } } } }
+      responses:
+        "200": { description: Approved, content: { application/json: { schema: { $ref: "#/components/schemas/Approval" } } } }
+        "403":
+          description: Self-approval or wrong role
+          content:
+            application/problem+json:
+              example:
+                type: https://otprobe.local/problems/self-approval-forbidden
+                title: Requester cannot approve their own request
+                status: 403
+                correlationId: 0192f0a1-0b2c-7e11-8c5d-5f2d9a1b7c35
+  /approvals/{approvalId}/reject:
+    post:
+      tags: [approvals]
+      parameters: [{ $ref: "#/components/parameters/ApprovalId" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/Decision" } } } }
+      responses:
+        "200": { description: Rejected }
+
+  # ---------------------------------------------------------------- agents (console)
+  /agents:
+    get:
+      tags: [agents]
+      parameters: [{ $ref: "#/components/parameters/Limit" }, { $ref: "#/components/parameters/Cursor" }, { name: status, in: query, schema: { $ref: "#/components/schemas/AgentStatus" } }]
+      responses:
+        "200": { description: OK }
+  /agents/{agentId}:
+    get:
+      tags: [agents]
+      parameters: [{ $ref: "#/components/parameters/AgentId" }]
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Agent" } } } }
+  /agents/{agentId}/heartbeats:
+    get:
+      tags: [agents]
+      parameters: [{ $ref: "#/components/parameters/AgentId" }, { $ref: "#/components/parameters/Limit" }, { $ref: "#/components/parameters/Cursor" }]
+      responses:
+        "200": { description: OK }
+  /agents/{agentId}/restart:
+    post:
+      tags: [agents]
+      summary: Restart agent service via WinRM (recovery for a crashed agent)
+      parameters: [{ $ref: "#/components/parameters/AgentId" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      responses:
+        "202": { description: Restart requested }
+  /agents/{agentId}/removals:
+    post:
+      tags: [agents]
+      summary: Request agent removal (creates approval)
+      parameters: [{ $ref: "#/components/parameters/AgentId" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody: { content: { application/json: { example: { purpose: "Decommission POC agent" } } } }
+      responses:
+        "201": { description: Removal requested, content: { application/json: { schema: { $ref: "#/components/schemas/Removal" } } } }
+  /removals/{removalId}:
+    get:
+      tags: [agents]
+      parameters: [{ name: removalId, in: path, required: true, schema: { type: string } }]
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Removal" } } } }
+  /removals/{removalId}/start:
+    post:
+      tags: [agents]
+      parameters: [{ name: removalId, in: path, required: true, schema: { type: string } }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      responses:
+        "202": { description: Rollback started }
+  /removals/{removalId}/retry:
+    post:
+      tags: [agents]
+      summary: Admin retry of a FAILED removal under the same approval
+      parameters: [{ name: removalId, in: path, required: true, schema: { type: string } }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      responses:
+        "202": { description: Rollback restarted }
+
+  # ---------------------------------------------------------------- agent protocol (called by agents)
+  /agents/enroll:
+    post:
+      tags: [agent-protocol]
+      security: []
+      summary: Exchange single-use enrollment token for a per-agent credential
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/EnrollRequest" }
+            example: { enrollmentToken: "enr_4mQk…", hostname: eng-ws-01, hostFingerprint: "sha256:9c1e…", agentVersion: 1.1.0 }
+      responses:
+        "201":
+          description: Enrolled
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EnrollResponse" }
+              example: { agentId: agt-0192f0b3, agentCredential: "agt_Q2x…(shown once)", heartbeatIntervalSec: 10, taskPollWaitSec: 20 }
+        "401": { $ref: "#/components/responses/Problem" }
+  /agents/{agentId}/heartbeat:
+    post:
+      tags: [agent-protocol]
+      security: [{ agentBearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/AgentId" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Heartbeat" }
+            example: { seq: 42, agentTime: "2026-11-02T10:20:00Z", agentVersion: 1.1.0, cpuPct: 3.1, memMb: 48, queueDepth: 0 }
+      responses:
+        "204": { description: Accepted }
+        "401":
+          description: Credential invalid or revoked
+          content:
+            application/problem+json:
+              example: { type: https://otprobe.local/problems/agent-credential-revoked, title: Agent credential revoked, status: 401 }
+  /agents/{agentId}/tasks:
+    get:
+      tags: [agent-protocol]
+      security: [{ agentBearer: [] }]
+      summary: Long-poll for tasks
+      parameters: [{ $ref: "#/components/parameters/AgentId" }, { name: waitSec, in: query, schema: { type: integer, maximum: 30, default: 20 } }]
+      responses:
+        "200":
+          description: Zero or more tasks
+          content:
+            application/json:
+              example:
+                - taskId: tsk-0192f0c1
+                  kind: RUN_ASSESSMENT
+                  correlationId: 0192f0c1-1111-7aaa-8bbb-000000000001
+                  deadline: "2026-11-02T10:22:00Z"
+                  payload: { policyId: windows-engineering-baseline, policyVersion: 1.0.0, collectors: [os, firewall, antivirus, patches, software, services, local_admins, password_policy, audit, usb, network, agent] }
+  /agents/{agentId}/tasks/{taskId}/evidence:
+    post:
+      tags: [agent-protocol]
+      security: [{ agentBearer: [] }]
+      summary: Upload evidence document for a task (see docs/RULES.md §4)
+      parameters: [{ $ref: "#/components/parameters/AgentId" }, { name: taskId, in: path, required: true, schema: { type: string } }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object } } } }
+      responses:
+        "202": { description: Evidence accepted; evaluation queued }
+
+  # ---------------------------------------------------------------- assessments, policies, findings, drift
+  /assets/{assetId}/assessments:
+    post:
+      tags: [assessments]
+      summary: Queue a deep assessment task for the asset's agent
+      parameters: [{ $ref: "#/components/parameters/AssetId" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody: { content: { application/json: { example: { policyId: windows-engineering-baseline } } } }
+      responses:
+        "202": { description: Queued, content: { application/json: { schema: { $ref: "#/components/schemas/AssessmentRun" } } } }
+        "409": { $ref: "#/components/responses/Problem" }
+  /assessments:
+    get:
+      tags: [assessments]
+      parameters: [{ $ref: "#/components/parameters/Limit" }, { $ref: "#/components/parameters/Cursor" }, { name: assetId, in: query, schema: { type: string } }]
+      responses:
+        "200": { description: OK }
+  /assessments/{runId}:
+    get:
+      tags: [assessments]
+      summary: Run with rule results, score, unknown count, evidence and diff vs previous
+      parameters: [{ name: runId, in: path, required: true, schema: { type: string } }]
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/AssessmentRun" } } } }
+  /policies:
+    get:
+      tags: [assessments]
+      responses:
+        "200": { description: Loaded policies and rules (from /rules data files) }
+  /findings:
+    get:
+      tags: [findings]
+      parameters:
+        - { $ref: "#/components/parameters/Limit" }
+        - { $ref: "#/components/parameters/Cursor" }
+        - { name: assetId, in: query, schema: { type: string } }
+        - { name: status, in: query, schema: { $ref: "#/components/schemas/FindingStatus" } }
+        - { name: severity, in: query, schema: { $ref: "#/components/schemas/Severity" } }
+        - { name: ruleId, in: query, schema: { type: string } }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/FindingPage" } } } }
+  /findings/{findingId}:
+    get:
+      tags: [findings]
+      summary: Finding with lifecycle events and linked drift events
+      parameters: [{ name: findingId, in: path, required: true, schema: { type: string } }]
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Finding" } } } }
+  /findings/{findingId}/accept-risk:
+    post:
+      tags: [findings]
+      summary: Admin only; reason required
+      parameters: [{ name: findingId, in: path, required: true, schema: { type: string } }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody: { required: true, content: { application/json: { example: { reason: "Vendor tool required until line upgrade", expiresAt: "2027-01-31T00:00:00Z" } } } }
+      responses:
+        "200": { description: OK }
+  /findings/{findingId}/revoke-acceptance:
+    post:
+      tags: [findings]
+      parameters: [{ name: findingId, in: path, required: true, schema: { type: string } }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      responses:
+        "200": { description: OK }
+  /drift-events:
+    get:
+      tags: [assessments]
+      parameters: [{ $ref: "#/components/parameters/Limit" }, { $ref: "#/components/parameters/Cursor" }, { name: assetId, in: query, schema: { type: string } }]
+      responses:
+        "200": { description: OK }
+
+  # ---------------------------------------------------------------- telemetry
+  /telemetry/topics:
+    get:
+      tags: [telemetry]
+      responses:
+        "200":
+          description: Topics with last value and client
+          content:
+            application/json:
+              example:
+                - { topic: factory/line1/sensor01/temperature, clientId: sensor01, assetId: "0192…1020", lastPayload: { temperature: 42.5, unit: C }, lastAt: "2026-11-02T10:20:05Z" }
+  /telemetry/messages:
+    get:
+      tags: [telemetry]
+      parameters: [{ $ref: "#/components/parameters/Limit" }, { $ref: "#/components/parameters/Cursor" }, { name: topic, in: query, schema: { type: string } }]
+      responses:
+        "200": { description: OK }
+
+  # ---------------------------------------------------------------- audit
+  /audit-events:
+    get:
+      tags: [audit]
+      parameters:
+        - { $ref: "#/components/parameters/Limit" }
+        - { $ref: "#/components/parameters/Cursor" }
+        - { name: action, in: query, schema: { type: string }, example: CONFIGURATION_DRIFT_DETECTED }
+        - { name: entityId, in: query, schema: { type: string } }
+        - { name: correlationId, in: query, schema: { type: string } }
+        - { name: actor, in: query, schema: { type: string } }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/AuditPage" } } } }
+  /audit-events/verify:
+    get:
+      tags: [audit]
+      summary: Verify the audit hash chain
+      responses:
+        "200": { description: OK, content: { application/json: { example: { valid: true, events: 1834, lastSeq: 1834 } } } }
+
+  # ---------------------------------------------------------------- demo controls
+  /demo/controls:
+    get:
+      tags: [demo]
+      summary: Catalogue of available controls and which devices they apply to
+      responses:
+        "200": { description: OK }
+  /demo/state:
+    get:
+      tags: [demo]
+      summary: Active faults and device power/state overview
+      responses:
+        "200": { description: OK }
+  /demo/devices/{deviceId}/controls:
+    post:
+      tags: [demo]
+      summary: Apply a simulation control to a device (admin)
+      parameters: [{ name: deviceId, in: path, required: true, schema: { type: string } }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DemoControl" }
+            examples:
+              firewallOff: { value: { control: firewall, value: disabled } }
+              checksum: { value: { control: package_checksum_mismatch, value: true } }
+              temp: { value: { control: sensor_value_override, value: 97.0 } }
+      responses:
+        "200": { description: Applied }
+        "403": { $ref: "#/components/responses/Problem" }
+  /demo/rogue:
+    post:
+      tags: [demo]
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      responses:
+        "201": { description: Rogue device injected into simulated network }
+  /demo/reset:
+    post:
+      tags: [demo]
+      summary: Reset POC to seed state (requires typed confirmation)
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content: { application/json: { example: { confirm: RESET, clearDiscoveryHistory: false, force: false } } }
+      responses:
+        "200": { description: Reset complete }
+        "409": { $ref: "#/components/responses/Problem" }
+
+components:
+  securitySchemes:
+    userJwt: { type: http, scheme: bearer, bearerFormat: JWT }
+    agentBearer: { type: http, scheme: bearer, description: "Per-agent credential `agt_…` issued by /agents/enroll" }
+  parameters:
+    IdempotencyKey: { name: Idempotency-Key, in: header, required: true, schema: { type: string, maxLength: 128 }, example: 7b0d6a8e-3f0c-4d0e-9a55-2b8f8b9b1c11 }
+    CorrelationId: { name: X-Correlation-ID, in: header, required: false, schema: { type: string } }
+    Limit: { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 50 } }
+    Cursor: { name: cursor, in: query, schema: { type: string } }
+    JobId: { name: jobId, in: path, required: true, schema: { type: string } }
+    AssetId: { name: assetId, in: path, required: true, schema: { type: string } }
+    DeploymentId: { name: deploymentId, in: path, required: true, schema: { type: string } }
+    ApprovalId: { name: approvalId, in: path, required: true, schema: { type: string } }
+    AgentId: { name: agentId, in: path, required: true, schema: { type: string } }
+  responses:
+    Problem:
+      description: RFC 7807 problem
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+  schemas:
+    Problem:
+      type: object
+      required: [type, title, status]
+      properties:
+        type: { type: string, format: uri }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string }
+        correlationId: { type: string }
+        errors: { type: array, items: { type: object, properties: { field: { type: string }, message: { type: string } } } }
+    Role: { enum: [OPERATOR, APPROVER, ADMIN] }
+    User:
+      type: object
+      properties: { id: { type: string }, username: { type: string }, displayName: { type: string }, role: { $ref: "#/components/schemas/Role" } }
+    LoginRequest: { type: object, required: [username, password], properties: { username: { type: string }, password: { type: string, format: password } } }
+    LoginResponse: { type: object, properties: { accessToken: { type: string }, expiresInSec: { type: integer }, user: { $ref: "#/components/schemas/User" } } }
+    Source: { enum: [ARP, ICMP, SNMP, WinRM, WMI, SSH, MQTT, DEEP_AGENT] }
+    Stage: { enum: [DISCOVERY, AGENTLESS, DEEP] }
+    Severity: { enum: [CRITICAL, HIGH, MEDIUM, LOW] }
+    Eligibility: { enum: [ELIGIBLE, REVIEW_REQUIRED, NOT_SUPPORTED, NOT_ELIGIBLE, UNKNOWN] }
+    DiscoveryStatus: { enum: [QUEUED, RUNNING, COMPLETED, FAILED, CANCELLED] }
+    DeploymentStatus: { enum: [REQUESTED, PENDING_APPROVAL, APPROVED, REJECTED, PRECHECK_RUNNING, PRECHECK_PASSED, PRECHECK_FAILED, DEPLOYING, ENROLLING, COMPLETED, FAILED] }
+    AgentStatus: { enum: [NOT_INSTALLED, ENROLLING, ONLINE, STALE, OFFLINE, REMOVING, REMOVED, ERROR] }
+    RemovalStatus: { enum: [REQUESTED, APPROVED, REJECTED, RUNNING, COMPLETED, FAILED] }
+    FindingStatus: { enum: [OPEN, RESOLVED, REOPENED, ACCEPTED_RISK] }
+    RuleStatus: { enum: [PASS, FAIL, WARNING, UNKNOWN] }
+    PageMeta:
+      type: object
+      properties: { nextCursor: { type: [string, "null"] }, total: { type: integer } }
+    WorkflowStep:
+      type: object
+      properties:
+        seq: { type: integer }
+        name: { type: string, example: TRANSFER_PACKAGE }
+        status: { enum: [PENDING, RUNNING, OK, FAILED, SKIPPED] }
+        detail: { type: string, example: "Transferred 18.4 MB of 24.1 MB" }
+        progress: { type: [number, "null"], example: 0.76 }
+        startedAt: { type: [string, "null"], format: date-time }
+        finishedAt: { type: [string, "null"], format: date-time }
+    Zone:
+      type: object
+      properties: { id: { type: string }, name: { type: string }, cidr: { type: string }, defaultLevel: { type: string }, safeMode: { type: boolean } }
+    DiscoveryJobCreate:
+      type: object
+      required: [targets]
+      properties:
+        targets: { type: array, items: { type: string }, minItems: 1 }
+        methods: { type: array, items: { enum: [ARP, ICMP, SNMP] }, default: [ARP, ICMP, SNMP] }
+    DiscoveryJob:
+      type: object
+      properties:
+        id: { type: string }
+        targets: { type: array, items: { type: string } }
+        methods: { type: array, items: { type: string } }
+        safeMode: { type: boolean, description: "true if any target zone is Level 0/1" }
+        status: { $ref: "#/components/schemas/DiscoveryStatus" }
+        progress: { type: integer, enum: [0, 10, 30, 60, 100] }
+        phase: { type: string, example: ARP }
+        devicesFound: { type: integer }
+        newAssets: { type: integer }
+        rogueCount: { type: integer }
+        requestedBy: { type: string }
+        correlationId: { type: string }
+        steps: { type: array, items: { $ref: "#/components/schemas/WorkflowStep" } }
+    DiscoveryJobPage:
+      allOf: [{ $ref: "#/components/schemas/PageMeta" }, { type: object, properties: { items: { type: array, items: { $ref: "#/components/schemas/DiscoveryJob" } } } }]
+    FieldValue:
+      type: object
+      properties:
+        path: { type: string, example: os.build }
+        value: {}
+        source: { $ref: "#/components/schemas/Source" }
+        sourceLabel: { type: string, example: "WMI (Demo)" }
+        stage: { $ref: "#/components/schemas/Stage" }
+        collectedAt: { type: string, format: date-time }
+      example: { path: firewall.state, value: enabled, source: WMI, sourceLabel: "WMI (Demo)", stage: AGENTLESS, collectedAt: "2026-11-02T10:05:11Z" }
+    AssetSummary:
+      type: object
+      properties:
+        id: { type: string }
+        ip: { type: string }
+        mac: { type: string }
+        hostname: { type: [string, "null"] }
+        sysName: { type: [string, "null"] }
+        type: { type: [string, "null"] }
+        os: { type: [string, "null"] }
+        level: { type: string, example: "2" }
+        criticality: { $ref: "#/components/schemas/Severity" }
+        status: { enum: [ONLINE, OFFLINE, UNREACHABLE, UNKNOWN] }
+        isRogue: { type: boolean }
+        agentState: { $ref: "#/components/schemas/AgentStatus" }
+        eligibility: { $ref: "#/components/schemas/Eligibility" }
+        eligibilityReason: { type: string }
+        lastSeen: { type: string, format: date-time }
+      example:
+        id: 0192f0a0-7c1e-7d40-9a51-0c3b2f1e0013
+        ip: 192.168.20.13
+        mac: "00:1A:2B:3C:20:13"
+        hostname: eng-ws-01
+        sysName: null
+        type: Windows Engineering Workstation
+        os: Windows 11 Enterprise 24H2 (26100.2314)
+        level: "2"
+        criticality: HIGH
+        status: ONLINE
+        isRogue: false
+        agentState: NOT_INSTALLED
+        eligibility: ELIGIBLE
+        eligibilityReason: Windows host with WinRM available.
+        lastSeen: "2026-11-02T10:05:11Z"
+    AssetPage:
+      allOf: [{ $ref: "#/components/schemas/PageMeta" }, { type: object, properties: { items: { type: array, items: { $ref: "#/components/schemas/AssetSummary" } } } }]
+    Classification:
+      type: object
+      properties:
+        type: { type: string }
+        confidence: { type: integer, minimum: 0, maximum: 100 }
+        evidence: { type: array, items: { type: object, properties: { signal: { type: string }, field: { type: string }, value: {}, weight: { type: integer } } } }
+      example:
+        type: Windows Engineering Workstation
+        confidence: 95
+        evidence:
+          - { signal: Windows OS, field: os.name, value: Microsoft Windows 11 Enterprise, weight: 30 }
+          - { signal: WinRM available, field: services.winrm.available, value: true, weight: 15 }
+          - { signal: Engineering software detected, field: "software.installed[].name", value: "Siemens-style TIA Portal V18 (demo data)", weight: 35 }
+          - { signal: Hostname pattern, field: identity.hostname, value: eng-ws-01, weight: 15 }
+    AssetDetail:
+      allOf:
+        - { $ref: "#/components/schemas/AssetSummary" }
+        - type: object
+          properties:
+            classification: { $ref: "#/components/schemas/Classification" }
+            groups:
+              type: object
+              description: "Effective fields grouped: identity, network, hardware, os, software, services, firewall, antivirus, patches, plc, snmp, mqtt"
+              additionalProperties: { type: array, items: { $ref: "#/components/schemas/FieldValue" } }
+            deployAgent:
+              type: object
+              description: Server-computed action availability (UI never decides)
+              properties: { enabled: { type: boolean }, reason: { type: string } }
+              example: { enabled: false, reason: "Traditional PLCs are handled agentless/read-only in this POC." }
+            currentAgentId: { type: [string, "null"] }
+            compliance: { type: object, properties: { score: { type: [integer, "null"] }, unknown: { type: integer }, lastRunId: { type: [string, "null"] } } }
+    Comparison:
+      type: object
+      properties:
+        rows:
+          type: array
+          items:
+            type: object
+            properties:
+              capability: { type: string }
+              agentless: { type: object, properties: { level: { enum: [Full, Partial, Available, Detailed, Limited, Collected, "Not collected", "N/A", "No", "Yes"] }, value: {}, source: { type: string } } }
+              deep: { type: object, properties: { level: { type: string }, value: {}, source: { type: string } } }
+      example:
+        rows:
+          - { capability: Applications, agentless: { level: Partial, value: 4, source: WMI }, deep: { level: Full, value: 61, source: DEEP_AGENT } }
+          - { capability: Local admins, agentless: { level: "Not collected" }, deep: { level: Collected, value: 4, source: DEEP_AGENT } }
+          - { capability: Heartbeat, agentless: { level: "N/A" }, deep: { level: "Yes", value: "8 s ago" } }
+    ProbeRun:
+      type: object
+      properties:
+        id: { type: string }
+        assetId: { type: string }
+        status: { enum: [QUEUED, RUNNING, COMPLETED, PARTIAL, FAILED] }
+        steps: { type: array, items: { $ref: "#/components/schemas/WorkflowStep" } }
+        protocols:
+          type: array
+          items: { type: object, properties: { protocol: { $ref: "#/components/schemas/Source" }, status: { type: string }, latencyMs: { type: number }, stages: { type: array, items: { type: object } } } }
+        classification: { $ref: "#/components/schemas/Classification" }
+        eligibility: { $ref: "#/components/schemas/Eligibility" }
+        eligibilityReason: { type: string }
+    Package:
+      type: object
+      properties:
+        id: { type: string, example: pkg-probe-agent-1.1.0 }
+        name: { type: string, example: Probe Agent }
+        version: { type: string, example: 1.1.0 }
+        architecture: { type: string, example: x64 }
+        sha256: { type: string }
+        sizeBytes: { type: integer }
+        supportedOs: { type: array, items: { type: string }, example: ["Windows 10", "Windows 11", "Windows Server 2019", "Windows Server 2022"] }
+        status: { enum: [ACTIVE, DEPRECATED, BLOCKED] }
+        createdAt: { type: string, format: date-time }
+    MaintenanceWindow: { type: object, properties: { start: { type: string, format: date-time }, end: { type: string, format: date-time } } }
+    DeploymentCreate:
+      type: object
+      required: [assetId, packageId, purpose]
+      properties:
+        assetId: { type: string }
+        packageId: { type: string }
+        credentialProfile: { type: string, default: OT-WINDOWS-INSTALLER }
+        purpose: { type: string }
+        maintenanceWindow: { $ref: "#/components/schemas/MaintenanceWindow" }
+    Approval:
+      type: object
+      properties:
+        id: { type: string }
+        subjectKind: { enum: [DEPLOYMENT, REMOVAL] }
+        subjectId: { type: string }
+        requestedBy: { type: string }
+        targetAssetId: { type: string }
+        purpose: { type: string }
+        criticality: { $ref: "#/components/schemas/Severity" }
+        maintenanceWindow: { $ref: "#/components/schemas/MaintenanceWindow" }
+        decision: { enum: [PENDING, APPROVED, REJECTED, EXPIRED] }
+        decidedBy: { type: [string, "null"] }
+        decidedAt: { type: [string, "null"], format: date-time }
+        reason: { type: [string, "null"] }
+    Decision: { type: object, properties: { reason: { type: string } } }
+    PrecheckResult:
+      type: object
+      properties:
+        check: { enum: [REACHABLE, HOSTNAME_VERIFIED, WINRM_AVAILABLE, AUTHENTICATION, PACKAGE_COMPATIBLE, DISK_SPACE, EXISTING_AGENT, SERVER_CONNECTIVITY, REBOOT_REQUIRED] }
+        status: { enum: [PASS, FAIL, WARN] }
+        detail: { type: string, example: "318 GB free (required 2 GB)" }
+    Deployment:
+      type: object
+      properties:
+        id: { type: string }
+        assetId: { type: string }
+        package: { $ref: "#/components/schemas/Package" }
+        credentialProfile: { type: string }
+        status: { $ref: "#/components/schemas/DeploymentStatus" }
+        approval: { $ref: "#/components/schemas/Approval" }
+        precheck: { type: array, items: { $ref: "#/components/schemas/PrecheckResult" } }
+        steps: { type: array, items: { $ref: "#/components/schemas/WorkflowStep" } }
+        actions:
+          type: object
+          description: Server-computed button states
+          properties:
+            precheck: { type: object, properties: { enabled: { type: boolean }, reason: { type: string } } }
+            deploy: { type: object, properties: { enabled: { type: boolean }, reason: { type: string } } }
+        agentId: { type: [string, "null"] }
+        failureCode: { type: [string, "null"], example: HASH_MISMATCH }
+        failureDetail: { type: [string, "null"] }
+        retryOfId: { type: [string, "null"] }
+        correlationId: { type: string }
+    Agent:
+      type: object
+      properties:
+        id: { type: string }
+        assetId: { type: string }
+        status: { $ref: "#/components/schemas/AgentStatus" }
+        version: { type: string }
+        credentialPrefix: { type: string, example: "agt_Q2x" }
+        enrolledAt: { type: [string, "null"], format: date-time }
+        lastHeartbeatAt: { type: [string, "null"], format: date-time }
+        secondsSinceHeartbeat: { type: [integer, "null"] }
+        missedHeartbeats: { type: integer }
+        revokedAt: { type: [string, "null"], format: date-time }
+        lastAssessmentAt: { type: [string, "null"], format: date-time }
+        nextAssessmentAt: { type: [string, "null"], format: date-time }
+    Removal:
+      type: object
+      properties:
+        id: { type: string }
+        agentId: { type: string }
+        status: { $ref: "#/components/schemas/RemovalStatus" }
+        approval: { $ref: "#/components/schemas/Approval" }
+        steps: { type: array, items: { $ref: "#/components/schemas/WorkflowStep" } }
+    EnrollRequest:
+      type: object
+      required: [enrollmentToken, hostname, hostFingerprint, agentVersion]
+      properties: { enrollmentToken: { type: string }, hostname: { type: string }, hostFingerprint: { type: string }, agentVersion: { type: string } }
+    EnrollResponse:
+      type: object
+      properties: { agentId: { type: string }, agentCredential: { type: string }, heartbeatIntervalSec: { type: integer }, taskPollWaitSec: { type: integer } }
+    Heartbeat:
+      type: object
+      required: [seq, agentTime]
+      properties: { seq: { type: integer }, agentTime: { type: string, format: date-time }, agentVersion: { type: string }, cpuPct: { type: number }, memMb: { type: number }, queueDepth: { type: integer } }
+    RuleResult:
+      type: object
+      properties:
+        ruleId: { type: string }
+        ruleVersion: { type: string }
+        title: { type: string }
+        status: { $ref: "#/components/schemas/RuleStatus" }
+        severity: { $ref: "#/components/schemas/Severity" }
+        evidencePath: { type: string }
+        observed: {}
+        expected: { type: string }
+        message: { type: [string, "null"] }
+        previousStatus: { type: [string, "null"] }
+      example: { ruleId: WIN-FW-001, ruleVersion: 1.0.0, title: Host firewall enabled, status: FAIL, severity: HIGH, evidencePath: firewall.state, observed: disabled, expected: enabled on all profiles, previousStatus: PASS }
+    AssessmentRun:
+      type: object
+      properties:
+        id: { type: string }
+        assetId: { type: string }
+        agentId: { type: [string, "null"] }
+        policyId: { type: string }
+        policyVersion: { type: string }
+        source: { enum: [DEEP_AGENT, AGENTLESS] }
+        trigger: { enum: [MANUAL, SCHEDULED, PROBE] }
+        status: { enum: [QUEUED, RUNNING, EVALUATED, FAILED, TIMED_OUT, CANCELLED] }
+        score: { type: [integer, "null"], example: 75 }
+        counts: { type: object, properties: { pass: { type: integer }, fail: { type: integer }, warning: { type: integer }, unknown: { type: integer } }, example: { pass: 7, fail: 2, warning: 1, unknown: 1 } }
+        results: { type: array, items: { $ref: "#/components/schemas/RuleResult" } }
+        previousRunId: { type: [string, "null"] }
+        driftEvents: { type: array, items: { $ref: "#/components/schemas/DriftEvent" } }
+        evidenceChanges: { type: array, items: { type: object, properties: { path: { type: string }, before: {}, after: {} } } }
+    DriftEvent:
+      type: object
+      properties:
+        id: { type: string }
+        assetId: { type: string }
+        ruleId: { type: string }
+        fromStatus: { $ref: "#/components/schemas/RuleStatus" }
+        toStatus: { $ref: "#/components/schemas/RuleStatus" }
+        evidencePath: { type: string }
+        before: {}
+        after: {}
+        findingId: { type: string }
+        detectedAt: { type: string, format: date-time }
+    Finding:
+      type: object
+      properties:
+        id: { type: string }
+        assetId: { type: string }
+        assetHostname: { type: string }
+        ruleId: { type: string }
+        title: { type: string }
+        severity: { $ref: "#/components/schemas/Severity" }
+        status: { $ref: "#/components/schemas/FindingStatus" }
+        source: { enum: [DEEP_AGENT, AGENTLESS, TELEMETRY, DISCOVERY] }
+        observed: {}
+        expected: { type: string }
+        references: { type: array, items: { type: string } }
+        firstSeen: { type: string, format: date-time }
+        lastSeen: { type: string, format: date-time }
+        resolvedAt: { type: [string, "null"], format: date-time }
+        reopenCount: { type: integer }
+        acceptedBy: { type: [string, "null"] }
+        acceptedReason: { type: [string, "null"] }
+        events: { type: array, items: { type: object, properties: { from: { type: string }, to: { type: string }, at: { type: string }, actor: { type: string }, runId: { type: string } } } }
+      example:
+        id: fnd-0192f0d0
+        assetId: 0192f0a0-7c1e-7d40-9a51-0c3b2f1e0013
+        assetHostname: eng-ws-01
+        ruleId: WIN-FW-001
+        title: Host firewall enabled
+        severity: HIGH
+        status: OPEN
+        source: DEEP_AGENT
+        observed: disabled
+        expected: enabled on all profiles
+        references: [IEC 62443-3-3 SR 5.2, NIST SP 800-82r3 6.2.1]
+        firstSeen: "2026-11-02T10:31:00Z"
+        lastSeen: "2026-11-02T10:31:00Z"
+        reopenCount: 0
+    FindingPage:
+      allOf: [{ $ref: "#/components/schemas/PageMeta" }, { type: object, properties: { items: { type: array, items: { $ref: "#/components/schemas/Finding" } } } }]
+    AuditEvent:
+      type: object
+      properties:
+        seq: { type: integer }
+        at: { type: string, format: date-time }
+        actorType: { enum: [USER, AGENT, SYSTEM, SIMULATOR] }
+        actorName: { type: string }
+        action: { type: string }
+        entityKind: { type: string }
+        entityId: { type: string }
+        correlationId: { type: string }
+        details: { type: object }
+        hash: { type: string }
+      example: { seq: 412, at: "2026-11-02T10:31:00Z", actorType: SYSTEM, actorName: assessment-engine, action: CONFIGURATION_DRIFT_DETECTED, entityKind: finding, entityId: fnd-0192f0d0, correlationId: 0192f0c9-…, details: { ruleId: WIN-FW-001, from: PASS, to: FAIL } }
+    AuditPage:
+      allOf: [{ $ref: "#/components/schemas/PageMeta" }, { type: object, properties: { items: { type: array, items: { $ref: "#/components/schemas/AuditEvent" } } } }]
+    DemoControl:
+      type: object
+      required: [control]
+      properties:
+        control:
+          enum: [power, winrm, firewall, antivirus, unauthorized_software, remove_patch, heartbeat_blocked, agent_crashed,
+                 icmp_blocked, snmp_timeout, winrm_bad_credentials, winrm_bad_certificate, winrm_refused, winrm_timeout,
+                 package_checksum_mismatch, install_failure, enrollment_failure, assessment_timeout, rollback_failure,
+                 plc_offline, sensor_value_override]
+        value: {}
+    DashboardSummary:
+      type: object
+      properties:
+        assets: { type: object, additionalProperties: { type: integer } }
+        agents: { type: object, additionalProperties: { type: integer } }
+        openFindings: { type: object, additionalProperties: { type: integer } }
+        compliance: { type: object, properties: { averageScore: { type: [integer, "null"] }, unknown: { type: integer } } }
+        recentDrift: { type: array, items: { $ref: "#/components/schemas/DriftEvent" } }
+        recentChanges: { type: array, items: { type: object } }
+    Topology:
+      type: object
+      properties:
+        nodes:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string }
+              kind: { enum: [zone, conduit, server, asset] }
+              parent: { type: [string, "null"] }
+              label: { type: string }
+              state: { enum: [ONLINE, OFFLINE, AGENTLESS, AGENT_INSTALLED, WARNING, FAILED, UNKNOWN] }
+        edges:
+          type: array
+          items: { type: object, properties: { source: { type: string }, target: { type: string }, protocol: { type: string }, port: { type: integer } } }
+    SseEvent:
+      type: object
+      properties:
+        id: { type: integer }
+        type: { type: string, example: discovery.device_found }
+        ts: { type: string, format: date-time }
+        correlationId: { type: string }
+        entity: { type: object, properties: { kind: { type: string }, id: { type: string } } }
+        data: { type: object }

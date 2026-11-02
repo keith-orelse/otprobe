@@ -1,0 +1,23 @@
+from fastapi import APIRouter, Depends
+from sqlalchemy import text
+
+from app import schemas
+from app.api.deps import get_ctx
+from app.context import AppContext
+from app.services import dashboard
+
+router = APIRouter(tags=["topology"])
+
+
+@router.get("/health")
+async def health(ctx: AppContext = Depends(get_ctx)) -> dict:
+    with ctx.db.session() as s:
+        s.execute(text("select 1"))
+    return {"status": "ok", "environment": "SIMULATED", "db": "ok",
+            "adapters": {"mode": ctx.registry.mode, "overrides": ctx.registry.overrides}}
+
+
+@router.get("/dashboard/summary", response_model=schemas.DashboardSummary)
+async def summary(ctx: AppContext = Depends(get_ctx)):
+    with ctx.db.session() as s:
+        return dashboard.summary(s, ctx.registry)

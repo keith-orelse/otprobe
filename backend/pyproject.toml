@@ -1,0 +1,41 @@
+[project]
+name = "otprobe-backend"
+version = "0.1.0"
+description = "OTProbe API, business services, engines and simulated adapters (POC)"
+requires-python = ">=3.12"
+# Dependencies: requirements.txt / requirements-dev.txt. This file holds tool config only.
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+markers = ["acceptance: end-to-end acceptance criteria A-K", "contract: adapter contract suite"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B"]
+ignore = ["B008"]  # FastAPI Depends()/Query() defaults
+
+[tool.importlinter]
+root_package = "app"
+
+[[tool.importlinter.contracts]]
+name = "Business layers never import the simulator or simulated adapters"
+type = "forbidden"
+source_modules = ["app.api.v1", "app.services", "app.engines"]
+forbidden_modules = ["app.sim", "app.adapters.simulated"]
+
+[[tool.importlinter.contracts]]
+name = "Simulator does not depend on business code"
+type = "forbidden"
+source_modules = ["app.sim"]
+forbidden_modules = ["app.api", "app.services", "app.engines", "app.adapters"]
+
+[[tool.importlinter.contracts]]
+name = "Simulated adapters do not depend on business code"
+type = "forbidden"
+source_modules = ["app.adapters.simulated"]
+forbidden_modules = ["app.api", "app.services", "app.engines"]

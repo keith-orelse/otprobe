@@ -1,0 +1,149 @@
+# Windows Engineering Baseline — compliance rules are DATA, evaluated server-side.
+# Grammar and evaluation order: docs/RULES.md
+policy:
+  id: windows-engineering-baseline
+  name: Windows Engineering Baseline
+  version: 1.0.0
+  kind: compliance
+  description: Baseline hardening checks for Windows engineering workstations and SCADA servers.
+  applies_to:
+    os.family: "== 'windows'"
+
+parameters:
+  unauthorized_software:
+    - RemoteTool Demo
+    - AnyRemote Demo
+    - TeamViewer-style Remote (demo data)
+  unsupported_os_products:
+    - Windows 7 Professional
+    - Windows 7 Enterprise
+    - Windows 10 Enterprise
+    - Windows 10 Pro
+    - Windows Server 2012 R2
+  max_enabled_local_admins: 2
+
+rules:
+  - id: WIN-FW-001
+    title: Host firewall enabled
+    severity: HIGH
+    sources: [DEEP_AGENT, AGENTLESS]
+    evidence: firewall.state
+    condition: "== 'enabled'"
+    expected: enabled on all profiles
+    on_fail: { status: FAIL, severity: HIGH }
+    on_missing: { status: UNKNOWN }
+    remediation: Enable Windows Defender Firewall for Domain, Private and Public profiles.
+    references: [IEC 62443-3-3 SR 5.2, NIST SP 800-82r3 6.2.1]
+
+  - id: WIN-AV-001
+    title: Antivirus running
+    severity: CRITICAL
+    sources: [DEEP_AGENT, AGENTLESS]
+    evidence: antivirus.state
+    condition: "== 'running'"
+    expected: running
+    on_fail: { status: FAIL, severity: CRITICAL }
+    on_missing: { status: UNKNOWN }
+    remediation: Start the antivirus service and verify real-time protection is on.
+    references: [IEC 62443-3-3 SR 3.2, NIST SP 800-82r3 6.2.4]
+
+  - id: WIN-PATCH-001
+    title: No missing security updates
+    severity: HIGH
+    sources: [DEEP_AGENT]
+    evidence: patches.missing_count
+    condition: "== 0"
+    expected: 0 missing updates
+    on_fail: { status: FAIL, severity: HIGH }
+    on_missing: { status: UNKNOWN }
+    remediation: Apply vendor-qualified updates during the next maintenance window.
+    references: [IEC 62443-2-3, NIST SP 800-82r3 6.2.7]
+
+  - id: WIN-SW-001
+    title: No unauthorized software installed
+    severity: MEDIUM
+    sources: [DEEP_AGENT, AGENTLESS]
+    evidence: software.installed[].name
+    condition: "not intersects $unauthorized_software"
+    expected: none of the unauthorized software list
+    on_fail: { status: WARNING, severity: MEDIUM }
+    on_missing: { status: UNKNOWN }
+    remediation: Remove the unauthorized remote-access tool or register an approved exception.
+    references: [IEC 62443-3-3 SR 7.7, NIST SP 800-82r3 6.2.2]
+
+  - id: WIN-OS-001
+    title: Operating system is vendor-supported
+    severity: HIGH
+    sources: [DEEP_AGENT, AGENTLESS]
+    evidence: os.product
+    condition: "not in $unsupported_os_products"
+    expected: a supported Windows release
+    on_fail: { status: FAIL, severity: HIGH }
+    on_missing: { status: UNKNOWN }
+    remediation: Plan migration to a supported OS or apply compensating controls.
+    references: [IEC 62443-2-3, NIST SP 800-82r3 6.2.7]
+
+  - id: WIN-PWD-001
+    title: Password policy minimum length and lockout
+    severity: MEDIUM
+    sources: [DEEP_AGENT]
+    evidence: password_policy.min_length
+    condition: ">= 12"
+    expected: minimum length >= 12
+    on_fail: { status: FAIL, severity: MEDIUM }
+    on_missing: { status: UNKNOWN }
+    references: [IEC 62443-3-3 SR 1.7]
+
+  - id: WIN-PWD-002
+    title: Account lockout threshold configured
+    severity: LOW
+    sources: [DEEP_AGENT]
+    evidence: password_policy.lockout_threshold
+    condition: "> 0 and <= 10"
+    expected: lockout after 1..10 failed attempts
+    on_fail: { status: FAIL, severity: LOW }
+    on_missing: { status: UNKNOWN }
+    references: [IEC 62443-3-3 SR 1.11]
+
+  - id: WIN-ADM-001
+    title: Limited local administrators
+    severity: MEDIUM
+    sources: [DEEP_AGENT]
+    evidence: local_admins.enabled_count
+    condition: "<= $max_enabled_local_admins"
+    expected: at most 2 enabled local administrator accounts/groups
+    on_fail: { status: FAIL, severity: MEDIUM }
+    on_missing: { status: UNKNOWN }
+    references: [IEC 62443-3-3 SR 2.1]
+
+  - id: WIN-USB-001
+    title: USB mass storage restricted
+    severity: MEDIUM
+    sources: [DEEP_AGENT]
+    evidence: usb.storage_policy
+    condition: "in ['blocked', 'read_only']"
+    expected: blocked or read_only
+    on_fail: { status: FAIL, severity: MEDIUM }
+    on_missing: { status: UNKNOWN }
+    references: [IEC 62443-3-3 SR 2.3]
+
+  - id: WIN-AUD-001
+    title: Logon auditing enabled
+    severity: LOW
+    sources: [DEEP_AGENT]
+    evidence: audit.logon_events
+    condition: "in ['success_and_failure', 'failure']"
+    expected: failure (or success and failure) logon events audited
+    on_fail: { status: FAIL, severity: LOW }
+    on_missing: { status: UNKNOWN }
+    references: [IEC 62443-3-3 SR 2.8]
+
+  - id: AGT-HEALTH-001
+    title: Probe agent healthy
+    severity: MEDIUM
+    sources: [DEEP_AGENT]
+    evidence: agent.health
+    condition: "== 'healthy'"
+    expected: healthy
+    on_fail: { status: FAIL, severity: MEDIUM }
+    on_missing: { status: UNKNOWN }

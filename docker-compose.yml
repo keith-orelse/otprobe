@@ -1,0 +1,53 @@
+# OTProbe POC — one command, no external infrastructure.
+# SIMULATED ENVIRONMENT - NO REAL DEVICES ARE BEING SCANNED
+name: otprobe
+
+x-sim-env: &sim-env
+  SPEED_FACTOR: ${SPEED_FACTOR:-1.0}
+  SEED: ${SEED:-42}
+  HEARTBEAT_INTERVAL_SEC: ${HEARTBEAT_INTERVAL_SEC:-10}
+  SIM_SERVICE_TOKEN: ${SIM_SERVICE_TOKEN:-change-me-sim-token}
+
+services:
+  api:
+    build: { context: ., dockerfile: backend/Dockerfile }
+    environment:
+      <<: *sim-env
+      ASSESSMENT_INTERVAL_SEC: ${ASSESSMENT_INTERVAL_SEC:-300}
+      DATABASE_URL: sqlite:////data/otprobe.db
+      ADAPTER_MODE: simulated
+      JWT_SECRET: ${JWT_SECRET:-change-me-jwt-secret}
+      VAULT_KEY: ${VAULT_KEY:-}
+      RULES_DIR: /app/rules
+    volumes:
+      - otprobe-data:/data
+    ports: ["8000:8000"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8000/api/v1/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  agent-runtime:
+    build: { context: ., dockerfile: agent/Dockerfile }
+    environment:
+      <<: *sim-env
+      OTPROBE_API_URL: http://api:8000
+    depends_on: { api: { condition: service_healthy } }
+    restart: unless-stopped
+
+  telemetry-sim:
+    build: { context: ., dockerfile: telemetry/Dockerfile }
+    environment:
+      <<: *sim-env
+      OTPROBE_API_URL: http://api:8000
+    depends_on: { api: { condition: service_healthy } }
+    restart: unless-stopped
+
+  web:
+    build: { context: ., dockerfile: frontend/Dockerfile }
+    ports: ["8080:80"]
+    depends_on: { api: { condition: service_healthy } }
+
+volumes:
+  otprobe-data:
