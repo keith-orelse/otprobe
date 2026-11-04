@@ -42,7 +42,8 @@ function Row({ a }: { a: Approval }) {
     <tr>
       <td className="mono">{time(a.createdAt)}</td><td>{a.subjectKind}</td>
       <td><Link to={`/assets/${a.targetAssetId}`}>{a.targetName}</Link>{" "}
-        {a.subjectKind === "DEPLOYMENT" && <Link to={`/deployments/${a.subjectId}`} className="small">request →</Link>}</td>
+        <Link to={a.subjectKind === "DEPLOYMENT" ? `/deployments/${a.subjectId}` : `/removals/${a.subjectId}`}
+          className="small">request →</Link></td>
       <td>{a.requestedBy}</td><td>{a.purpose}</td><td><Pill value={a.criticality} /></td>
       <td className="small">{a.maintenanceWindow ? `${time(a.maintenanceWindow.start)} – ${time(a.maintenanceWindow.end)}` : "—"}</td>
       <td><Pill value={a.status} /></td>

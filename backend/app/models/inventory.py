@@ -98,6 +98,7 @@ class DiscoveryJob(Base):
     devices_found: Mapped[int] = mapped_column(Integer, default=0)
     new_assets: Mapped[int] = mapped_column(Integer, default=0)
     rogue_count: Mapped[int] = mapped_column(Integer, default=0)
+    archived: Mapped[bool] = mapped_column(Boolean, default=False)   # history kept across Reset POC; not a baseline
     requested_by: Mapped[str] = mapped_column(String(64))
     error: Mapped[str | None] = mapped_column(Text)
     correlation_id: Mapped[str] = mapped_column(String(128))

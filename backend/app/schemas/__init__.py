@@ -385,6 +385,8 @@ class Agent(Camel):
     heartbeat_interval_sec: float = 0
     revoked_at: datetime | None
     removed_at: datetime | None
+    actions: dict[str, "ActionState"] = {}
+    removal_id: str | None = None
 
 
 class HeartbeatRecord(Camel):
@@ -634,3 +636,62 @@ class MonitoringRow(Camel):
 
 AssetDetail.model_rebuild()
 DashboardSummary.model_rebuild()
+
+
+# ---------------------------------------------------------------- Phase 5: removal, telemetry, demo, reset
+class RemovalCreate(Camel):
+    purpose: str = Field("Decommission POC agent", min_length=3, max_length=500)
+
+
+class Removal(Camel):
+    id: str
+    asset_id: str
+    asset_name: str | None = None
+    agent_id: str
+    status: str
+    purpose: str
+    requested_by: str
+    approval: Approval | None = None
+    failure_code: str | None
+    failure_detail: str | None
+    correlation_id: str
+    created_at: datetime
+    started_at: datetime | None
+    finished_at: datetime | None
+    steps: list[WorkflowStep] = []
+    actions: dict[str, ActionState] = {}
+
+
+class TelemetryTopic(Camel):
+    topic: str
+    client_id: str
+    asset_id: str | None
+    asset_name: str | None
+    last_payload: Any = None
+    last_at: datetime
+    messages: int
+    open_findings: list[str] = []
+    recent: list[dict[str, Any]] = []
+
+
+class TelemetryRecord(Camel):
+    topic: str
+    client_id: str
+    asset_id: str | None
+    payload: Any = None
+    received_at: datetime
+
+
+class DemoReset(Camel):
+    confirm: str = Field(description='Type "RESET" to confirm', examples=["RESET"])
+    clear_discovery_history: bool = False
+    force: bool = False
+
+
+class DemoResetResult(Camel):
+    status: str
+    cleared: dict[str, int]
+    discovery_history: str
+    agents_revoked: int
+
+Agent.model_rebuild()

@@ -25,7 +25,8 @@ class SimulatedSnmpAdapter(SimAdapterMixin, SnmpAdapter):
         if d is None or not d.online or d.state.get("snmp") is None:
             return ResultStatus.TIMEOUT, "No SNMP response (request timed out)"
         if d.has("snmp_timeout"):
-            return ResultStatus.TIMEOUT, "SNMPv3 request timed out"
+            profile = target.credential.profile if target.credential else "none"
+            return ResultStatus.TIMEOUT, f"SNMPv3 request timed out (profile {profile})"
         user = d.state["snmp"]["user"]
         cred = target.credential
         if cred is None or cred.username != user["username"] or cred.secret != user["secret"]:

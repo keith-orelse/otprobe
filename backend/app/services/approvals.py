@@ -11,9 +11,9 @@ from app.core import audit
 from app.core.clock import utcnow
 from app.core.errors import ProblemError, not_found
 from app.core.principal import CurrentUser
-from app.models import Approval, Asset, Deployment
+from app.models import Approval, Asset, Deployment, Removal
 from app.services.common import paginate
-from app.workflow.machine import APPROVAL, DEPLOYMENT
+from app.workflow.machine import APPROVAL, DEPLOYMENT, REMOVAL
 
 DECIDERS = ("APPROVER", "ADMIN")
 
@@ -77,9 +77,10 @@ def decide(ctx: AppContext, session: Session, approval_id: str, user: CurrentUse
                            f"Approval {a.id} cannot go from {a.status} to {'APPROVED' if approve else 'REJECTED'}")
     if not approve and not reason:
         raise ProblemError(422, "reason-required", "A reason is required to reject")
-    if approve and a.criticality == "CRITICAL" and not reason:
+    if approve and a.criticality == "CRITICAL" and a.subject_kind == "DEPLOYMENT" and not reason:
         raise ProblemError(422, "reason-required", "A reason is required to approve a deployment to a critical asset")
     dep = session.get(Deployment, a.subject_id) if a.subject_kind == "DEPLOYMENT" else None
+    rem = session.get(Removal, a.subject_id) if a.subject_kind == "REMOVAL" else None
     now = utcnow()
     if approve and a.maint_window_end and a.maint_window_end < now:
         APPROVAL.transition(session, a, "EXPIRED", user.actor, "Maintenance window ended before a decision")
@@ -92,4 +93,7 @@ def decide(ctx: AppContext, session: Session, approval_id: str, user: CurrentUse
     if dep is not None:
         DEPLOYMENT.transition(session, dep, "APPROVED" if approve else "REJECTED", user.actor, reason,
                               {"approvalId": a.id})
+    if rem is not None:
+        REMOVAL.transition(session, rem, "APPROVED" if approve else "REJECTED", user.actor, reason,
+                           {"approvalId": a.id})
     return to_schema(session, a, user).dump(), None

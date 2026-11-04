@@ -18,15 +18,7 @@ class BrokerMessage:
     received_at: datetime
 
 
-def topic_matches(topic_filter: str, topic: str) -> bool:
-    f_parts, t_parts = topic_filter.split("/"), topic.split("/")
-    for i, f in enumerate(f_parts):
-        if f == "#":
-            return True
-        if i >= len(t_parts) or (f != "+" and f != t_parts[i]):
-            return False
-    return len(f_parts) == len(t_parts)
-
+from app.core.mqtt_topics import topic_matches  # noqa: E402,F401  (re-exported)
 
 Handler = Callable[[BrokerMessage], Awaitable[None]]
 

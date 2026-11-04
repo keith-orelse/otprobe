@@ -63,3 +63,36 @@ async def set_config(h: Harness, device: str, control: str, value: str) -> None:
     await h.login("admin")
     await h.post(f"/demo/devices/{device}/config", {"control": control, "value": value}, expect=200)
     h.client.headers["Authorization"] = user
+
+
+async def publish(h: Harness, client_id: str, topic: str, payload: dict, expect: int = 202) -> None:
+    from tests.conftest import SIM_HEADERS
+    r = await h.client.post("/sim/v1/mqtt/publish", json={"clientId": client_id, "topic": topic, "payload": payload},
+                            headers=SIM_HEADERS)
+    assert r.status_code == expect, r.text
+
+
+async def as_admin(h: Harness, method: str, path: str, json=None, expect: int | None = 200):
+    prev = h.client.headers.get("Authorization")
+    await h.login("admin")
+    try:
+        if method == "post":
+            return await h.post(path, json, expect=expect)
+        return await h.get(path)
+    finally:
+        h.client.headers["Authorization"] = prev
+
+
+async def fault(h: Harness, device: str, name: str, enabled: bool = True, params: dict | None = None) -> None:
+    await as_admin(h, "post", f"/demo/devices/{device}/faults",
+                   {"fault": name, "enabled": enabled, "params": params or {}})
+
+
+async def remove_agent(h: Harness, agent_id: str, until=("COMPLETED", "FAILED")) -> dict:
+    await h.login("operator")
+    rem = (await h.post(f"/agents/{agent_id}/removals", {"purpose": "Decommission POC agent"}, expect=201)).json()
+    await h.login("approver")
+    await h.post(f"/approvals/{rem['approval']['id']}/approve", expect=200)
+    await h.login("operator")
+    await h.post(f"/removals/{rem['id']}/start", expect=202)
+    return await h.wait_for(f"/removals/{rem['id']}", lambda r: r["status"] in until, timeout=30)

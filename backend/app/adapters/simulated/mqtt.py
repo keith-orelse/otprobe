@@ -69,3 +69,7 @@ class SimulatedMqttAdapter(SimAdapterMixin, MqttAdapter):
 
     async def unsubscribe(self, subscription_id: str) -> None:
         self.broker.unsubscribe(subscription_id)
+
+    async def clients(self) -> list[dict]:
+        return [{"client_id": c["client_id"], "source_ip": c["source_ip"], "topics": c["topics"]}
+                for c in self.world.mqtt_clients() if c["connected"]]

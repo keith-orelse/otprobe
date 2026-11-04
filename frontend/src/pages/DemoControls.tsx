@@ -2,7 +2,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiAction, apiGet } from "../api";
 import { can, useMe } from "../auth";
 import { ErrorBox, Panel, Pill } from "../components/ui";
-import type { DemoState } from "../types";
+import { useState } from "react";
+import type { DemoResetResult, DemoState } from "../types";
 
 export function DemoControls() {
   const me = useMe();
@@ -15,9 +16,18 @@ export function DemoControls() {
       apiAction(`/demo/devices/${v.device}/config`, { control: v.control, value: v.value }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["demo"] }),
   });
+  const [temp, setTemp] = useState("97");
+  const [confirm, setConfirm] = useState("");
+  const [clearHistory, setClearHistory] = useState(false);
+  const rogue = useMutation({ mutationFn: () => apiAction<{ ip: string; mac: string }>("/demo/rogue"),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["demo"] }) });
+  const reset = useMutation({
+    mutationFn: () => apiAction<DemoResetResult>("/demo/reset", { confirm, clearDiscoveryHistory: clearHistory, force: true }),
+    onSuccess: () => { setConfirm(""); qc.invalidateQueries(); },
+  });
   const toggle = useMutation({
-    mutationFn: (v: { device: string; fault: string; enabled: boolean }) =>
-      apiAction(`/demo/devices/${v.device}/faults`, { fault: v.fault, enabled: v.enabled }),
+    mutationFn: (v: { device: string; fault: string; enabled: boolean; params?: Record<string, unknown> }) =>
+      apiAction(`/demo/devices/${v.device}/faults`, { fault: v.fault, enabled: v.enabled, params: v.params ?? {} }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["demo"] }),
   });
   return (
@@ -25,9 +35,39 @@ export function DemoControls() {
       <h1>SIMULATION CONTROLS</h1>
       <div className="note">These controls change the <b>simulated</b> world only. OTProbe notices the effect the way a real
         product would: through probes, precheck, deployment and agent heartbeats. Admin only. Every change is audited.
-        Telemetry, rogue injection and Reset POC arrive in Phase 5.</div>
+        Every failure here is documented in docs/FAILURE_MATRIX.md (result, message, audit event, recovery).</div>
       {!allowed && me.data && <div className="error-box">Role {me.data.role} cannot use simulation controls (admin only).</div>}
-      <ErrorBox error={q.error ?? toggle.error ?? config.error} />
+      <ErrorBox error={q.error ?? toggle.error ?? config.error ?? rogue.error ?? reset.error} />
+      {q.data && (
+        <Panel title="Scenarios">
+          <div className="scenario-grid">
+            <div>
+              <h3 className="sub">Sensor temperature</h3>
+              <input className="narrow" value={temp} onChange={(e) => setTemp(e.target.value)} /> °C{" "}
+              <button className="btn btn-sm" onClick={() => toggle.mutate({ device: "dev-ts01", fault: "sensor_value_override",
+                enabled: true, params: { value: Number(temp) } })}>Raise</button>{" "}
+              <button className="btn btn-sm" onClick={() => toggle.mutate({ device: "dev-ts01", fault: "sensor_value_override",
+                enabled: false })}>Normal</button>
+              <p className="hint">&gt; 80 °C: WARNING (TEL-TEMP-001). &gt; 95 °C: CRITICAL (TEL-TEMP-002).</p>
+            </div>
+            <div>
+              <h3 className="sub">Rogue device</h3>
+              <button className="btn btn-sm" onClick={() => rogue.mutate()}>Inject rogue device</button>
+              {rogue.data && <p className="hint">Added {rogue.data.ip} ({rogue.data.mac}). Run discovery to detect it.</p>}
+            </div>
+            <div className="reset-box">
+              <h3 className="sub">Reset POC</h3>
+              <p className="hint">Restores seed state: no agents, no findings, simulated world rebuilt. The audit log is kept.
+                Running workflows are cancelled.</p>
+              <label className="check"><input type="checkbox" checked={clearHistory} onChange={(e) => setClearHistory(e.target.checked)} />
+                Also clear discovery history</label>
+              <input className="narrow" placeholder='Type "RESET"' value={confirm} onChange={(e) => setConfirm(e.target.value)} />{" "}
+              <button className="btn btn-sm btn-danger" disabled={confirm !== "RESET" || reset.isPending} onClick={() => reset.mutate()}>RESET POC</button>
+              {reset.data && <p className="hint">{reset.data.status}. Discovery history {reset.data.discoveryHistory}.</p>}
+            </div>
+          </div>
+        </Panel>
+      )}
       {q.data && (
         <Panel title="Host configuration (drives assessment drift)">
           <table className="dense">
@@ -64,7 +104,7 @@ export function DemoControls() {
                 <td>
                   <select value="" onChange={(e) => e.target.value && toggle.mutate({ device: d.deviceId, fault: e.target.value, enabled: true })}>
                     <option value="">Inject fault…</option>
-                    {Object.entries(q.data!.availableFaults).filter(([k]) => !d.faults.includes(k)).map(([k, label]) => (
+                    {Object.entries(q.data!.availableFaults).filter(([k]) => !d.faults.includes(k) && k !== "sensor_value_override").map(([k, label]) => (
                       <option key={k} value={k}>{k}: {label}</option>))}
                   </select>
                 </td>

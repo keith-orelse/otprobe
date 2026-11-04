@@ -28,6 +28,7 @@ from app.rules.book import RuleBook
 from app.services.agents import run_watchdog
 from app.services.assessments import sync_policies
 from app.services.bootstrap import seed_config, seed_trust
+from app.services.telemetry import TelemetryService
 from app.sim.broker import Broker
 from app.sim.latency import SimLatency
 from app.sim.seed import seed_world
@@ -59,7 +60,7 @@ def build_context(settings: Settings, plugins: Iterable[AdapterPlugin] = ()) -> 
     ctx = AppContext(settings=settings, db=db, hub=hub, registry=registry,
                      vault=SimulatedCredentialVault(db, fernet), runner=JobRunner(), pacer=pacer,
                      rules=RuleBook.load(settings.rules_dir), transfer=build_transfer(registry, world, latency),
-                     sim_control=SimulatedControl(world), tickets=StreamTickets(),
+                     sim_control=SimulatedControl(world, broker), tickets=StreamTickets(),
                      extras={"world": world, "broker": broker})
     for plugin in plugins:
         plugin(registry, ctx)
@@ -79,12 +80,15 @@ def create_app(settings: Settings | None = None, adapter_plugins: Iterable[Adapt
     async def lifespan(app: FastAPI):
         ctx = build_context(settings, adapter_plugins)
         app.state.ctx = ctx
+        telemetry = ctx.extras["telemetry"] = TelemetryService(ctx)
+        await telemetry.start()
         watchdog = asyncio.create_task(run_watchdog(ctx), name="heartbeat-watchdog")
         try:
             yield
         finally:
             watchdog.cancel()
             await asyncio.gather(watchdog, return_exceptions=True)
+            await telemetry.stop()
             await ctx.runner.shutdown()
             ctx.db.dispose()
 

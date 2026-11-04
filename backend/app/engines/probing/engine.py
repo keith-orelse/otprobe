@@ -14,6 +14,7 @@ from app.core.clock import utcnow
 from app.core.correlation import get_correlation_id
 from app.engines.assessment.runner import evaluate_agentless
 from app.engines.inventory import effective_fields, refresh_asset, upsert_fields
+from app.engines.protocol_events import SNMP_EVENTS, winrm_event
 from app.models import Asset, ProbeResult, ProbeRun, Zone
 from app.workflow.machine import PROBE
 from app.workflow.steps import StepTracker
@@ -37,6 +38,10 @@ class ProbeEngine:
                                        "at": st.at.isoformat() if st.at else None} for st in res.stages],
                               error_code=res.error_code, error_detail=res.error_detail,
                               collected_at=res.collected_at or utcnow()))
+
+    def _audit(self, asset_id: str, event: str, detail: str | None) -> None:
+        with self.ctx.db.session() as s:
+            audit.record(s, ACTOR, event, "asset", asset_id, {"message": detail})
 
     async def run(self, probe_id: str) -> None:
         db = self.ctx.db
@@ -86,6 +91,7 @@ class ProbeEngine:
             tracker.ok("ICMP", f"{reach} · rtt {res.data.get('reachability.rtt_ms')} ms")
         elif reach == "BLOCKED":
             tracker.ok("ICMP", "BLOCKED: no ICMP reply. This does not mean the device is offline.")
+            self._audit(asset_id, "ICMP_BLOCKED_OBSERVED", "No ICMP reply. This does not mean the device is offline.")
         else:
             tracker.fail("ICMP", f"{reach}: {res.error_detail}")
 
@@ -126,6 +132,7 @@ class ProbeEngine:
                     record(hc)
                     failed.append("WINRM")
                     tracker.fail("WINRM", hc.error_detail or hc.status.value)
+                    self._audit(asset_id, winrm_event(hc.status), hc.error_detail)
                 else:
                     tracker.skip("WINRM", "TCP 5986 closed: WinRM not available on this device")
             else:
@@ -145,6 +152,7 @@ class ProbeEngine:
                 else:
                     failed.append("WINRM")
                     tracker.fail("WINRM", res.error_detail or res.status.value, {"stages": stages})
+                    self._audit(asset_id, winrm_event(res.status), res.error_detail)
 
         tracker.start("WMI", "CIM queries over WinRM")
         if session is None:
@@ -176,6 +184,7 @@ class ProbeEngine:
             record(res)
             failed.append("SNMP")
             tracker.fail("SNMP", f"{res.error_detail}. Identity fields not refreshed")
+            self._audit(asset_id, SNMP_EVENTS.get(res.status, "SNMP_ERROR"), res.error_detail)
         else:
             tracker.skip("SNMP", "No SNMP agent responded")
 

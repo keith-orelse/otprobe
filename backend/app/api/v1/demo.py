@@ -23,6 +23,19 @@ async def fault(device_id: str, req: schemas.DemoFault, user: CurrentUser = Depe
     return idem.execute(ctx.db, 200, action)
 
 
+@router.post("/rogue", summary="SIMULATION CONTROLS: inject a rogue device into the simulated network (admin)")
+async def rogue(user: CurrentUser = Depends(admin_only), idem: Idempotency = Depends(require_idempotency),
+                ctx: AppContext = Depends(get_ctx)):
+    return idem.execute(ctx.db, 201, demo.inject_rogue(ctx, user))
+
+
+@router.post("/reset", response_model=schemas.DemoResetResult,
+             summary="SIMULATION CONTROLS: Reset POC to seed state (typed confirmation; audit log is kept)")
+async def reset(req: schemas.DemoReset, user: CurrentUser = Depends(admin_only), ctx: AppContext = Depends(get_ctx)):
+    from app.services.reset import reset as do_reset
+    return await do_reset(ctx, req, user)
+
+
 @router.post("/devices/{device_id}/config", response_model=schemas.DemoDevice,
              summary="SIMULATION CONTROLS: change host configuration (firewall, antivirus, software, patches)")
 async def config(device_id: str, req: schemas.DemoConfig, user: CurrentUser = Depends(admin_only),

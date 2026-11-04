@@ -78,7 +78,7 @@ def refresh_asset(session: Session, asset: Asset, book: RuleBook) -> dict[str, A
     asset.hostname = flat.get("identity.hostname")
     asset.sys_name = flat.get("snmp.sys_name")
     asset.os_name = _os_label(flat)
-    asset.display_name = asset.hostname or asset.sys_name or asset.ip
+    asset.display_name = asset.hostname or asset.sys_name or flat.get("mqtt.client_id") or asset.ip
     zone = session.get(Zone, asset.zone_id) if asset.zone_id else None
     cls = classify(doc, book)
     if cls is not None:

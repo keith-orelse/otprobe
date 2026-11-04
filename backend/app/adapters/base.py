@@ -242,6 +242,11 @@ class MqttAdapter(ProtocolAdapter):
     @abc.abstractmethod
     async def unsubscribe(self, subscription_id: str) -> None: ...
 
+    @abc.abstractmethod
+    async def clients(self) -> list[dict[str, Any]]:
+        """Connected clients as the broker reports them (real brokers: $SYS / admin API):
+        [{"client_id", "source_ip", "topics"}]."""
+
 
 # ---- Non-protocol infrastructure interfaces (same swap rules apply) ----------------------------
 
@@ -303,6 +308,13 @@ class SimulationControl(abc.ABC):
 
     @abc.abstractmethod
     def clear_fault(self, device_id: str, fault: str) -> None: ...
+
+    @abc.abstractmethod
+    def inject_rogue(self) -> dict[str, Any]: ...
+
+    @abc.abstractmethod
+    def reset(self) -> None:
+        """Rebuild the simulated world from seed (Reset POC)."""
 
     @abc.abstractmethod
     def apply_config(self, device_id: str, control: str, value: str) -> str:

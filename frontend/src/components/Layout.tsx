@@ -13,7 +13,7 @@ export const NAV: { label: string; to: string; phase?: number }[] = [
   { label: "Agents", to: "/agents" },
   { label: "Assessments", to: "/assessments" },
   { label: "Findings", to: "/findings" },
-  { label: "MQTT Telemetry", to: "/telemetry", phase: 5 },
+  { label: "MQTT Telemetry", to: "/telemetry" },
   { label: "Audit Logs", to: "/audit" },
   { label: "Demo Controls", to: "/demo" },
   { label: "Settings", to: "/settings" },

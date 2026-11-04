@@ -3,7 +3,7 @@ import ReactDOM from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { Layout, NAV } from "./components/Layout";
-import { AgentDetail, Agents } from "./pages/Agents";
+import { AgentDetail, Agents, RemovalDetail } from "./pages/Agents";
 import { Approvals } from "./pages/Approvals";
 import { AssessmentDetail, Assessments } from "./pages/Assessments";
 import { Compare } from "./pages/Compare";
@@ -20,6 +20,7 @@ import { NetworkMap } from "./pages/NetworkMap";
 import { Pending } from "./pages/Pending";
 import { Probes } from "./pages/Probes";
 import { Settings } from "./pages/Settings";
+import { Telemetry } from "./pages/Telemetry";
 import "./styles.css";
 
 const queryClient = new QueryClient({ defaultOptions: { queries: { staleTime: 2000, refetchOnWindowFocus: false } } });
@@ -50,6 +51,8 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             <Route path="findings" element={<Findings />} />
             <Route path="findings/:id" element={<FindingDetail />} />
             <Route path="assets/:id/compare" element={<Compare />} />
+            <Route path="removals/:id" element={<RemovalDetail />} />
+            <Route path="telemetry" element={<Telemetry />} />
             {NAV.filter((n) => n.phase).map((n) => <Route key={n.to} path={n.to.slice(1)} element={<Pending />} />)}
           </Route>
         </Routes>

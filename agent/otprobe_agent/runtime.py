@@ -153,7 +153,8 @@ class Supervisor:
     def __init__(self, cfg: Config) -> None:
         self.cfg = cfg
         self.running: dict[str, asyncio.Task] = {}
-        self.dead: dict[str, str] = {}   # device -> "revoked" | "crashed"
+        self.dead: dict[str, tuple[str, str | None]] = {}   # device -> ("revoked" | "crashed", deploymentId)
+        self.installs: dict[str, dict] = {}
 
     async def run(self) -> None:
         async with httpx.AsyncClient(timeout=30) as client:
@@ -170,10 +171,13 @@ class Supervisor:
 
     def reconcile(self, client: httpx.AsyncClient, installs: list[dict]) -> None:
         present = {i["deviceId"]: i for i in installs}
-        for device_id, why in list(self.dead.items()):
-            gone = device_id not in present
-            restarted = why == "crashed" and "agent_crashed" not in present.get(device_id, {}).get("faults", [])
-            if gone or restarted:
+        self.installs = present
+        for device_id, (why, deployment) in list(self.dead.items()):
+            current = present.get(device_id)
+            gone = current is None
+            reinstalled = current is not None and current.get("deploymentId") != deployment
+            restarted = why == "crashed" and current is not None and "agent_crashed" not in current["faults"]
+            if gone or reinstalled or restarted:
                 del self.dead[device_id]
         wanted = {d for d, i in present.items()
                   if i["serviceState"] == "running" and "agent_crashed" not in i["faults"]} - set(self.dead)
@@ -194,7 +198,8 @@ class Supervisor:
         exc = task.exception()
         if isinstance(exc, (Revoked, Crashed)):
             log.warning("[%s] agent stopped: %s", device_id, exc)
-            self.dead[device_id] = "crashed" if isinstance(exc, Crashed) else "revoked"
+            deployment = self.installs.get(device_id, {}).get("deploymentId")
+            self.dead[device_id] = ("crashed" if isinstance(exc, Crashed) else "revoked", deployment)
         elif exc is not None:
             log.error("[%s] agent crashed unexpectedly: %r", device_id, exc)
 

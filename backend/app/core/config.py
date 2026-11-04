@@ -30,6 +30,8 @@ class Settings:
     agent_server_url: str = "http://127.0.0.1:8000"
     precheck_valid_sec: float = 1800.0
     assessment_timeout_sec: float = 120.0
+    telemetry_time_scale: float = 1.0   # scales telemetry staleness windows (tests use < 1)
+    telemetry_retention: int = 10_000
     run_migrations: bool = True
 
     @classmethod
@@ -41,6 +43,7 @@ class Settings:
             heartbeat_interval_sec=float(env.get("HEARTBEAT_INTERVAL_SEC", 10)),
             assessment_interval_sec=float(env.get("ASSESSMENT_INTERVAL_SEC", 300)),
             assessment_timeout_sec=float(env.get("ASSESSMENT_TIMEOUT_SEC", 120)),
+            telemetry_time_scale=float(env.get("TELEMETRY_TIME_SCALE", 1.0)),
             enrollment_token_ttl_sec=int(env.get("ENROLLMENT_TOKEN_TTL_SEC", 900)),
             enrollment_timeout_sec=float(env.get("ENROLLMENT_TIMEOUT_SEC", 120)),
             adapter_mode=env.get("ADAPTER_MODE", "simulated"),

@@ -1,7 +1,6 @@
 # OTProbe — Architecture
 
-> Status: Phases 2–3 implemented (simulator, discovery, probing, classification, topology; auth, approvals,
-> deployment, enrollment, the agent runtime and heartbeats).
+> Status: complete (Phases 1–5). The decisions made during the build are in [DECISIONS.md](DECISIONS.md).
 >
 > OTProbe is a standalone proof-of-concept for **OT asset discovery, agentless probing and deep agent probing**.
 > The OT network, its devices and every protocol response are **simulated**. The web console, REST API,
@@ -371,4 +370,4 @@ Each acceptance criterion maps to one test module: `tests/acceptance/test_a_disc
 
 ## 14. Decisions taken in this design (please confirm or change)
 
-See the "Open questions" section of the [README](../README.md#phase-1-open-questions).
+See [DECISIONS.md](DECISIONS.md) (every Phase 1 default was accepted).

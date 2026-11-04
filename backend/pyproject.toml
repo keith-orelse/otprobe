@@ -9,7 +9,9 @@ requires-python = ">=3.12"
 testpaths = ["tests"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
-markers = ["acceptance: end-to-end acceptance criteria A-K", "contract: adapter contract suite"]
+markers = ["acceptance: end-to-end acceptance criteria A-K", "contract: adapter contract suite",
+           "e2e: browser smoke test (Playwright); run with -m e2e"]
+addopts = "-m 'not e2e'"
 
 [tool.ruff]
 line-length = 120

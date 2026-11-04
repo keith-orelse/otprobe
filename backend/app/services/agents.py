@@ -106,6 +106,11 @@ def to_schema(ctx: AppContext, session: Session, a: Agent) -> schemas.Agent:
     out.heartbeat_interval_sec = ctx.settings.heartbeat_interval_sec
     if a.last_heartbeat_at:
         out.seconds_since_heartbeat = int((utcnow() - a.last_heartbeat_at).total_seconds())
+    from app.models import Removal
+    from app.services.removals import remove_action, restart_action
+    out.actions = {"remove": remove_action(session, a), "restart": restart_action(a)}
+    out.removal_id = session.scalar(select(Removal.id).where(Removal.agent_id == a.id)
+                                    .order_by(Removal.created_at.desc()).limit(1))
     return out
 
 
@@ -170,15 +175,23 @@ def watchdog_tick(ctx: AppContext) -> None:
                     step.status, step.detail, step.finished_at = "FAILED", detail, now
 
 
+def _telemetry_tick(ctx: AppContext) -> None:
+    telemetry = ctx.extras.get("telemetry")
+    if telemetry is not None:
+        telemetry.staleness_tick()
+
+
 async def run_watchdog(ctx: AppContext) -> None:
     """Background loop: heartbeat staleness, enrollment timeouts, assessment scheduling and timeouts, risk expiry."""
     from app.services import assessments, findings
 
     period = max(0.1, min(1.0, ctx.settings.heartbeat_interval_sec / 4))
     while True:
-        for tick in (watchdog_tick, assessments.timeout_tick, assessments.scheduler_tick, findings.expiry_tick):
+        ticks = [watchdog_tick, assessments.timeout_tick, assessments.scheduler_tick, findings.expiry_tick,
+                 _telemetry_tick]
+        for tick in ticks:
             try:
                 tick(ctx)
             except Exception:  # noqa: BLE001 - the loop must keep running
-                log.exception("%s failed", tick.__name__)
+                log.exception("%s failed", getattr(tick, "__name__", "tick"))
         await asyncio.sleep(period)

@@ -123,4 +123,4 @@ erDiagram
   stay.
 - `telemetry_messages` is the only table that rolls up automatically (see above).
 - Reset POC: see [STATE_MACHINES.md §7](STATE_MACHINES.md#7-reset-poc). `audit_events` is **kept** across a
-  reset, and a `POC_RESET` event is appended (pending your confirmation; see README open questions).
+  reset, and a `POC_RESET` event is appended (decision Q2, accepted).

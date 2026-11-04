@@ -1,249 +1,177 @@
 # OTProbe
 
-**Simulated OT discovery, agentless probing and deep agent probing: a standalone, fully local POC.**
+**Simulated OT discovery, agentless probing and deep agent probing: a standalone, fully local proof of concept.**
 
 > **SIMULATED ENVIRONMENT - NO REAL DEVICES ARE BEING SCANNED.**
 > The OT network, its devices and every protocol response are simulated. The web console, REST API, database,
 > workflows, approvals, compliance rules, findings and audit trail are real.
 
-## Status
-
-| Phase | Scope | Status |
-|---|---|---|
-| 1 | Design documents, contracts, rules schema, project skeleton | Done |
-| 2 | Simulator, seed, discovery (SSE), assets, agentless probing, classification, topology | Done (approved) |
-| 3 | Auth/roles, approvals, vault, packages, precheck, deployment, enrollment, agent runtime, heartbeat | Done (approved) |
-| 4 | Assessments, rule engine, scoring, findings lifecycle, drift, comparison screen | **Done, awaiting review** |
-| 5 | Demo controls, failure scenarios, rollback, MQTT telemetry, UI polish, tests, demo script | — |
+All five build phases are complete. Acceptance criteria A–K are automated (150 tests, including a Playwright browser
+smoke test).
 
 ## Quick start
+
+### Docker (one command)
 
 ```bash
 cp .env.example .env
 docker compose up --build
-# Console:  http://localhost:8080      API docs: http://localhost:8000/docs
+# Console http://localhost:8080 · API docs http://localhost:8000/docs
 ```
 
-### Without Docker (local development)
+Compose starts four containers: `api`, `agent-runtime` and `telemetry-sim` (both separate processes that make only
+outbound calls), and `web`. Data lives in the `otprobe-data` volume and survives restarts.
+*The Compose setup is written but has not been run on the development machine, because Docker was not installed
+there. The local setup below is what was verified.*
 
-Requires Python 3.11+ (the container uses 3.12) and Node 20+.
+### Local processes (verified)
+
+Requires Python 3.11+ and Node 20+.
 
 ```bash
 cd backend && python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
-.venv/bin/uvicorn app.main:app --port 8000          # creates ./otprobe.db, runs migrations, seeds the simulated plant
-cd frontend && npm install && npm run dev           # http://localhost:5173 (proxies /api to :8000)
-cd agent && ../backend/.venv/bin/python -m otprobe_agent   # agent runtime: a SEPARATE process (needs httpx)
+cd frontend && npm install
 ```
 
-Log in as one of the seeded demo users (synthetic credentials): `operator / operator-demo`,
-`approver / approver-demo`, `admin / admin-demo`.
-
-`SPEED_FACTOR=0.3` makes simulated delays faster. `HEARTBEAT_INTERVAL_SEC=2` makes agents go STALE in 6 s and OFFLINE
-in 12 s, which keeps the heartbeat demo short. Delete `backend/otprobe.db` to start from scratch until Reset POC
-arrives in Phase 5.
-
-### Tests
+Run each of these in its own terminal:
 
 ```bash
-cd backend && .venv/bin/pytest            # unit, adapter contract, acceptance (A–G, J-partial, K)
-.venv/bin/ruff check app tests && .venv/bin/lint-imports   # lint + layering contracts
+cd backend   && SPEED_FACTOR=0.5 HEARTBEAT_INTERVAL_SEC=2 .venv/bin/uvicorn app.main:app --port 8000
+cd frontend  && npm run dev                                                          # http://localhost:5173
+cd agent     && OTPROBE_API_URL=http://127.0.0.1:8000 ../backend/.venv/bin/python -m otprobe_agent
+cd telemetry && OTPROBE_API_URL=http://127.0.0.1:8000 ../backend/.venv/bin/python -m otprobe_telemetry
 ```
 
-## What works now (Phase 2)
+**Demo users** (synthetic credentials):
 
-- **Discovery** (`Discovery` screen / `POST /api/v1/discovery/jobs`): ARP → ICMP → SNMP over 192.168.20.0/24 and
-  192.168.10.0/24. Progress goes 10/30/60/100%, and devices appear one by one over SSE. Assets are merged by MAC.
-  Rediscovery flags unknown MACs as rogue. Level 0/1 runs in safe mode.
-- **Assets**: the inventory table and an asset page with every field grouped and labelled with its source, stage and age.
-- **Agentless probe** (`RUN AGENTLESS PROBE`): live ICMP → ARP → WinRM (with session stages) → WMI → SNMP → SSH →
-  MQTT → collect → classify. Classification is data-driven (`rules/classification.yaml`), with confidence and
-  evidence. Agent eligibility is data-driven (`rules/eligibility.yaml`).
-- **PLC pages** show vendor, firmware and mode from SNMP. Deploy Agent is disabled with the reason "Traditional PLCs
-  are handled agentless/read-only in this POC."
-- **Network Map**: DMZ → conduit → switch → Purdue levels, built only from what OTProbe has observed (switch
-  LLDP/FDB links, WMI netstat and MQTT flows).
-- **Audit Logs**: a hash-chained audit trail with a verify button. Every action and transition carries a correlation ID.
-- **Settings**: zones, the masked credential vault, the package repository and the adapter table.
+| Username | Password | Role |
+|---|---|---|
+| `operator` | `operator-demo` | requests discovery, probes, deployments and removals |
+| `approver` | `approver-demo` | approves or rejects requests |
+| `admin` | `admin-demo` | everything above, plus the simulation controls |
 
-## What works now (Phase 3)
+Follow **[docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md)** for the full walkthrough. Use **Demo Controls → Reset POC**
+to start over.
 
-- **Login and roles**: JWT login for the three seeded users. The API enforces role checks (operator requests,
-  approver decides, admin does both and controls the demo). Every audit event names the acting user.
-  `/auth/me` returns the user's permissions, so the console never decides what a role may do.
-- **Approvals**: each approval records the requester, target, purpose, criticality, maintenance window, decision,
-  approver, timestamp and reason. **A requester can never approve their own request, admins included**
-  (`403 self-approval-forbidden`, audited as `APPROVAL_SELF_DENIED`). Critical assets (scada-01) need a maintenance
-  window and an approval reason.
-- **Package repository**: Probe Agent 1.0.0 (DEPRECATED) and 1.1.0 (ACTIVE), each with a real SHA-256, size,
-  architecture, supported OS list and creation date.
-- **Precheck**: nine checks, each PASS/FAIL/WARN with a detail line: reachable, hostname verified, WinRM available,
-  authentication, package compatible, disk space, existing agent, server connectivity, reboot. DEPLOY AGENT stays
-  disabled until precheck passes, and a pass is valid for 30 minutes.
-- **Deployment**: connect → WinRM session → retrieve credential (mint the enrollment token) → transfer package (with
-  %) → verify hash → install → service created → start → await enrollment. Every step is visible live.
-- **Enrollment and agent trust**: the enrollment token is single-use, has a 15-minute TTL, is stored hashed and is
-  bound to the asset and deployment. `POST /agents/enroll` exchanges it for a per-agent bearer credential, which is
-  also stored hashed and shown once. Heartbeat and task polling require that credential.
-- **Agent runtime**: `agent/otprobe_agent`, a separate process (its own container in Compose). It starts an agent for
-  every virtual host where the installer ran. Each agent enrolls, heartbeats and long-polls for tasks **over
-  outbound HTTP only**; the server never connects to it.
-- **Heartbeat watchdog**: an agent goes STALE after 3 missed heartbeats and OFFLINE after 6, and returns to ONLINE on
-  the next heartbeat. The Agents screen shows "Last heartbeat: N seconds ago".
-- **State machines** (section 8): deployment, agent, approval and removal transitions are validated and audited.
-  Removal is declared now; the rollback workflow that uses it arrives in Phase 5.
-- **SIMULATION CONTROLS** (admin, partial): device faults for testing this phase: `heartbeat_blocked`,
-  `agent_crashed`, WinRM failures, `package_checksum_mismatch`, `install_failure`, `enrollment_failure` and others.
+## Configuration
 
-## What works now (Phase 4)
+| Variable | Default | Meaning |
+|---|---|---|
+| `SPEED_FACTOR` | 1.0 | Scales all simulated delays |
+| `SEED` | 42 | Deterministic latency, telemetry and noise |
+| `HEARTBEAT_INTERVAL_SEC` | 10 | Agent heartbeat period. STALE after 3 missed, OFFLINE after 6 |
+| `ASSESSMENT_INTERVAL_SEC` / `ASSESSMENT_TIMEOUT_SEC` | 300 / 120 | Scheduled deep assessments and their timeout |
+| `ENROLLMENT_TOKEN_TTL_SEC` / `ENROLLMENT_TIMEOUT_SEC` | 900 / 120 | Token lifetime, and how long to wait for first contact |
+| `TELEMETRY_INTERVAL_SEC` | 5 | Telemetry simulator publish period |
+| `ADAPTER_MODE` / `ADAPTER_OVERRIDES` | simulated / — | Adapter selection, e.g. `snmp=real` |
+| `DATABASE_URL`, `JWT_SECRET`, `SIM_SERVICE_TOKEN`, `VAULT_KEY` | see `.env.example` | Demo values |
 
-- **Deep assessment**: RUN DEEP ASSESSMENT (asset page) queues a `RUN_ASSESSMENT` task. The agent picks it up over
-  its long-poll, runs local collectors against its own host and uploads one evidence document. The **server**
-  evaluates the rules; the agent only collects.
-- **Rules are data** (`rules/windows_engineering_baseline.yaml`, validated against `rules/schema.json`). Evaluation
-  order is missing evidence → UNKNOWN, then type check, then condition. Each loaded policy version is stored and
-  audited (`POLICY_LOADED`).
-- **Score**: a weighted pass rate (CRITICAL 10, HIGH 6, MEDIUM 3, LOW 1; WARNING counts half), with UNKNOWN excluded
-  and shown separately. eng-ws-01's first run gives 75%: 7 pass, 2 fail, 1 warning, 1 unknown.
-- **Findings**: one per asset + rule. Each records observed, expected, source, severity, first and last seen. They
-  auto-resolve when the check passes, reopen on regression, and accept-risk is admin-only with a reason and optional
-  expiry. Sources are DEEP_AGENT, AGENTLESS (rules evaluated after every probe, e.g. eng-ws-02's unsupported OS) and
-  DISCOVERY (rogue devices).
-- **Drift**: each run is compared with the previous run of the same policy and source. PASS → FAIL/WARNING creates a
-  `CONFIGURATION_DRIFT_DETECTED` event linked to the finding. Every evidence change is listed as a configuration
-  change.
-- **Agentless vs Deep Agent** screen per asset, computed from what each stage actually collected. For example, the
-  agent sees `RemoteTool Demo`, which the agentless probe cannot.
-- **Continuous monitoring**: scheduled assessments every `ASSESSMENT_INTERVAL_SEC` (default 300). The dashboard
-  shows last heartbeat, last and next assessment, compliance, open findings, drift and configuration changes.
-  Assessments time out after `ASSESSMENT_TIMEOUT_SEC` (default 120).
-- **Configuration controls** (Demo Controls, admin): firewall, antivirus, unauthorized software and remove-patch, to
-  create drift.
+## What it does
 
-## How to test acceptance criteria E and F
-
-- **Automated:** `cd backend && .venv/bin/pytest tests/acceptance/test_e_assessment.py tests/acceptance/test_f_drift.py -v`
-- **Scripted (real API):** `API=http://127.0.0.1:8000 ./scripts/try_e_f.sh` (deploys an agent first if needed)
-- **By hand in the console:** [docs/TESTING_E_F.md](docs/TESTING_E_F.md)
-
-## How to test acceptance criteria D and G
-
-**Automated** (the agent runtime is spawned as a real subprocess; the API is served over loopback HTTP):
-
-```bash
-cd backend && .venv/bin/pytest tests/acceptance/test_d_deployment.py tests/acceptance/test_g_heartbeat.py -v
-```
-
-**Scripted through the real API** (needs a running API and agent runtime):
-
-```bash
-API=http://127.0.0.1:8000 ./scripts/try_d_g.sh
-```
-
-**By hand in the console**: see [docs/TESTING_D_G.md](docs/TESTING_D_G.md).
-
-### Known gaps, scheduled for later phases
-
-| Gap | Phase |
+| Area | Highlights |
 |---|---|
-| Remove agent / rollback, the "restart agent service" action, and the full failure matrix with UI messages | 5 |
-| Full Demo Controls UI (telemetry, rogue injection, PLC offline, Reset POC) | 5 |
-| MQTT telemetry, telemetry rules/findings, and the MQTT Telemetry screen | 5 |
-
-## Repository layout
-
-```
-docker-compose.yml        api · agent-runtime · telemetry-sim · web  (+ volume otprobe-data)
-backend/app/              FastAPI app: api/ services/ engines/ adapters/ sim/ workflow/ models/ schemas/
-backend/app/adapters/base.py   protocol adapter interfaces (Phase 1 deliverable)
-backend/tests/            unit/ contract/ acceptance/
-agent/                    simulated agent runtime (separate process, outbound HTTP only)
-telemetry/                telemetry simulator (separate process)
-frontend/                 React + Vite + TypeScript console
-rules/                    compliance / telemetry / classification / eligibility rules as DATA + schema.json
-docs/                     design documents (below)
-```
-
-## Design documents
-
-| Doc | What it covers |
-|---|---|
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Containers, layering, simulation boundary, agent model, workflows, SSE, security, API conventions, simplifications |
-| [docs/SIMULATED_NETWORK.md](docs/SIMULATED_NETWORK.md) | Seed devices, MACs, per-protocol capabilities, host state, topology |
-| [docs/DATA_MODEL.md](docs/DATA_MODEL.md) | ERD, tables, retention |
-| [docs/ADAPTERS.md](docs/ADAPTERS.md) | Adapter interfaces, contract tests, how to replace each simulated adapter |
-| [docs/PROVENANCE.md](docs/PROVENANCE.md) | Field provenance, provenance matrix, merge-by-MAC, classification |
-| [docs/STATE_MACHINES.md](docs/STATE_MACHINES.md) | Discovery, deployment, agent, removal, finding (and supporting) state machines |
-| [docs/FAILURE_MATRIX.md](docs/FAILURE_MATRIX.md) | Every injectable failure → state, UI message, audit event, recovery |
-| [docs/RULES.md](docs/RULES.md) | Rule schema, condition grammar, evaluation order, score formula, drift |
-| [docs/api/openapi.yaml](docs/api/openapi.yaml) | OpenAPI 3.1 contract draft |
-
-`docs/DEMO_SCRIPT.md` is written in Phase 5.
+| Discovery | ARP → ICMP → SNMP. Progress goes 10/30/60/100% with live device events (SSE). Merge by MAC. Safe mode for Level 0/1. Rogue detection on rediscovery |
+| Inventory and provenance | Every field records its source, stage (DISCOVERY / AGENTLESS / DEEP) and collection time. Effective values and per-stage comparison |
+| Agentless probing | ICMP, ARP, WinRM (session stages), WMI/CIM, SNMP, SSH stub, MQTT. Data-driven classification with confidence and evidence. Data-driven eligibility |
+| Auth and approvals | JWT, three roles, no self-approval for any role, everything audited with the acting user |
+| Deployment | Credential vault, package repository (real SHA-256), 9-check precheck, live deploy steps, single-use hashed enrollment token, per-agent credential |
+| Agents | A separate process, outbound only: enrolls, heartbeats, long-polls for tasks, uploads evidence. Restart and rollback with revocation |
+| Compliance | Rules as YAML data, ordered evaluation, weighted score with UNKNOWN excluded, findings lifecycle, drift, configuration changes, Agentless vs Deep Agent comparison, scheduled assessments |
+| Telemetry | In-process MQTT broker, a separate telemetry simulator, threshold and staleness rules → TELEMETRY findings |
+| Simulation controls | All failure-matrix faults, host configuration changes, sensor override, rogue injection, Reset POC (typed confirmation) |
+| Platform | REST `/api/v1`, Swagger at `/docs`, RFC 7807 errors, correlation IDs, idempotency keys, pagination, SSE, hash-chained audit log, SQLite with Alembic migrations |
 
 ## REAL vs SIMULATED
 
 | Layer | Status |
 |---|---|
-| Web console, REST API, OpenAPI, RFC 7807 errors, idempotency, correlation IDs | **REAL** |
-| Auth (JWT), RBAC, self-approval prevention, approvals | **REAL** |
-| Database, migrations, persistence across restarts | **REAL** (SQLite) |
-| Workflows and state machines, audit trail (hash-chained) | **REAL** |
-| Enrollment tokens, agent credentials, revocation | **REAL** |
-| Agent runtime process, heartbeats, task polling, evidence upload over HTTP | **REAL** (separate container) |
-| Rule engine, rules-as-data, scoring, findings, drift | **REAL** |
-| SSE live updates | **REAL** |
-| Credential vault | **SIMULATED** secrets, real encrypted storage |
-| Package repository and transfer | **SIMULATED** transfer, real metadata and hashes |
+| Web console; REST API; OpenAPI; RFC 7807; idempotency; correlation IDs; SSE | **REAL** |
+| Auth (JWT); RBAC; self-approval prevention; approvals; maintenance windows | **REAL** |
+| Database; migrations; persistence across restarts; Reset POC | **REAL** (SQLite) |
+| Workflows and state machines; hash-chained audit trail | **REAL** |
+| Enrollment tokens; agent credentials; revocation | **REAL** (real hashing; secrets shown once) |
+| Agent runtime process; HTTP enroll, heartbeat, task polling and evidence upload | **REAL** (separate process/container) |
+| Rule engine; rules as data; scoring; findings; drift; comparison | **REAL** |
+| Telemetry ingest; telemetry rules; findings | **REAL** |
+| Credential vault | **SIMULATED** secrets in real encrypted storage |
+| Package repository and transfer | **SIMULATED** transfer; real metadata and SHA-256 |
 | ICMP, ARP, SNMP, WinRM, WMI/CIM, SSH adapters | **SIMULATED** |
-| MQTT broker and telemetry | **SIMULATED** (in-process broker + telemetry-sim) |
-| Devices, hosts, topology, faults | **SIMULATED** |
+| MQTT broker; telemetry publishers | **SIMULATED** (in-process broker plus a separate telemetry-sim process) |
+| OT devices, hosts, topology, faults; what the agent reads from its host | **SIMULATED** (`sim_*` tables, `/sim/v1`) |
 
-How to replace each simulated adapter with a real one: [docs/ADAPTERS.md §5](docs/ADAPTERS.md#5-replacing-simulated-adapters-with-real-ones).
+## Replacing simulated adapters with real ones
 
-## Phase 1 open questions
+The business services see only the interfaces in `backend/app/adapters/base.py`. Implementations are chosen by
+configuration (`ADAPTER_MODE`, `ADAPTER_OVERRIDES`), and the same contract test suite (`tests/contract`) applies to
+every implementation. Acceptance K proves that a swap needs no business-code change.
 
-The design makes a default choice for each of these. Please confirm or change.
-
-| # | Question | Default chosen in the docs |
+| Adapter | Suggested real implementation | Main gaps to close |
 |---|---|---|
-| Q1 | What are the "baseline findings" after Reset POC? | Reset clears the OTProbe inventory, so there are **no** findings until discovery and a probe run again. The first agentless probe of eng-ws-02 produces `WIN-OS-001` (unsupported OS, source AGENTLESS). The alternative is for Reset to keep discovered assets and agentless data, and remove only agent/deep data. |
-| Q2 | Should Reset POC clear the audit log? | **No.** The audit log is append-only and survives a reset, with a `POC_RESET` event added. |
-| Q3 | Retrying a FAILED deployment (e.g. checksum failure) | Creates a **new** deployment (`retry_of_id`) that needs a **new approval**. The alternative is to reuse the original approval if the target and package are unchanged. |
-| Q4 | Removal state machine additions | Added `REQUESTED → REJECTED` and an admin retry `FAILED → RUNNING` under the same approval. Neither is in the brief. |
-| Q5 | Acceptance A says "discovery of 192.168.20.0/24 … sensors found only via ARP", but the sensors are on 192.168.10.0/24 | The test discovers **both** subnets in one job and asserts that the sensors' only discovery source is ARP. |
-| Q6 | Drift trigger | PASS→FAIL **and** PASS→WARNING emit `CONFIGURATION_DRIFT_DETECTED`. The brief names only PASS→FAIL. |
+| ICMP | `icmplib` (unprivileged) | Raw-socket privileges; strict rate limits for Level 0/1 |
+| ARP | Switch ARP/FDB tables over SNMP, or passive SPAN capture (`scapy`) | Avoid active sweeps on L1/L0; one collector per segment |
+| SNMP | `pysnmp` (asyncio, v3 authPriv) | Vendor MIBs for PLC mode and firmware |
+| WinRM | `pypsrp` (HTTPS 5986, NTLM/Kerberos) | Kerberos/JEA least privilege; signed scripts per `RemoteOperation` |
+| WMI/CIM | `pypsrp` running `Get-CimInstance` | Installed-apps coverage (32/64-bit, per-user) |
+| SSH | `asyncssh` | Host-key pinning; read-only collectors |
+| MQTT | `aiomqtt` with Mosquitto/EMQX/HiveMQ | TLS/client certs; read-only ACL; client list from the broker admin API |
+| Package transfer | Agent bootstrapper pulls a signed URL from OTProbe (or `pypsrp` copy/SMB) | Authenticode verification; resumable transfer |
+| Credential vault | HashiCorp Vault (`hvac`), CyberArk, Azure Key Vault | Rotation; just-in-time credentials |
 
-Phase 2 went ahead with these defaults.
+Details: [docs/ADAPTERS.md §5](docs/ADAPTERS.md#5-replacing-simulated-adapters-with-real-ones).
 
-## Phase 2 notes for review
+## Tests
 
-| # | Topic | What was done / proposed |
-|---|---|---|
-| N1 | Python version | Code is 3.11-compatible (tested locally on 3.11.x). Docker runs 3.12 |
-| N2 | Pagination cursor | Opaque, offset-encoded in the POC. It can become keyset-based without an API change |
-| N3 | Agentless software visibility | `RemoteTool Demo` is a **per-user** install, so agentless WMI (machine-scope Uninstall keys) does not see it; only the deep agent will. **Proposal for Phase 4:** make `WIN-SW-001` `DEEP_AGENT`-only, so agentless never reports a false PASS |
-| N4 | Classification confidence | eng-ws-01 scores **91%**. The unmatched signal is "Dual-homed (L2 + L1 interfaces)". Confidences and evidence come entirely from `rules/classification.yaml` |
-| N5 | Unprobed Windows hosts | After discovery alone, Windows hosts are unclassified with eligibility `UNKNOWN`. This follows the provenance matrix: discovery yields no OS data |
+```bash
+cd backend
+.venv/bin/pytest                    # 149 tests: unit, adapter contract, acceptance A–K (agent/telemetry as subprocesses)
+.venv/bin/pytest -m e2e             # Playwright browser smoke test of the main journey (starts Vite itself)
+.venv/bin/ruff check app tests ../agent ../telemetry && .venv/bin/lint-imports   # lint and 5 layering contracts
+```
 
-## Phase 3 notes for review
+| Criterion | Test module(s) |
+|---|---|
+| A: progressive discovery, merge by MAC, sensors via ARP only | `tests/acceptance/test_a_discovery.py` |
+| B: agentless probe on eng-ws-01, sources, classification | `test_b_agentless_probe.py` |
+| C: PLC agentless; Deploy Agent disabled with reason | `test_c_plc.py` |
+| D: no self-approval; approval → precheck → deploy → enroll → heartbeat; separate agent process | `test_d_deployment.py` |
+| E: first deep assessment, mixed results, findings | `test_e_assessment.py` |
+| F: firewall drift → finding OPEN → RESOLVED → REOPENED | `test_f_drift.py` |
+| G: heartbeat loss → STALE → OFFLINE → ONLINE | `test_g_heartbeat.py` |
+| H: every failure-matrix row | `test_h_failures.py`, `test_h_live_failures.py` (+ G, phase-4 extras) |
+| I: rollback, revocation, history retained | `test_i_rollback.py` |
+| J: restart persistence; Reset POC | `test_j_restart.py`, `test_j_reset.py` |
+| K: adapter contracts; swap by configuration | `tests/contract/`, `test_k_adapter_swap.py` |
 
-| # | Topic | What was done |
-|---|---|---|
-| N6 | "Retrieve credential" step | The installer credential is fetched from the vault when the WinRM session opens (and audited as `CREDENTIAL_RETRIEVED`). The `RETRIEVE_CREDENTIAL` step mints the agent's enrollment credential: the single-use token that the installer writes into the agent's enrollment bundle |
-| N7 | Enrollment idempotency | `POST /agents/enroll` does not store an idempotency record, because that would persist the plaintext credential. The single-use token makes the call idempotent: a replay returns `401 Enrollment token already used` |
-| N8 | Enrollment failure | The simulated fault makes the agent present a tampered token. It is rejected (`ENROLLMENT_TOKEN_REJECTED`), and the deployment goes `FAILED / ENROLLMENT_FAILED` when `ENROLLMENT_TIMEOUT_SEC` (default 120 s) expires, leaving the agent in `ERROR` |
-| N9 | Simulator token | One shared `SIM_SERVICE_TOKEN` guards `/sim/v1` (not scoped per host). This is a deliberate simplification: `/sim` stands in for each host's own disk |
-| N10 | Approval reason | A reason is required to reject, and to approve a deployment to a CRITICAL asset |
-| N11 | Who runs precheck and deploy | The requester (operator) or an admin. Approvers only decide |
-| N12 | Bug fixed | List filters sent in camelCase (`entityId`, `correlationId`, `assetId`) were silently ignored. They now work, with a regression test |
+Scripted walkthroughs against a running stack: `scripts/try_d_g.sh`, `scripts/try_e_f.sh`.
 
-## Phase 4 notes for review
+## Documentation
 
-| # | Topic | What was done |
-|---|---|---|
-| N13 | WIN-SW-001 is deep-agent only | Implemented as proposed in N3 (Phase 2). Agentless WMI cannot see per-user installs, so an agentless PASS would be false |
-| N14 | Drift baseline | Drift compares with the previous run of the **same source** (deep with deep, agentless with agentless). Comparing across sources would create false drift, because agentless evidence is partial. `docs/RULES.md` is updated |
-| N15 | Observed value for list rules | For `not intersects` rules, the finding records only the offending items (`["RemoteTool Demo"]`), not the whole software list |
-| N16 | Rogue finding | `NET-ROGUE-001` (source DISCOVERY) is created on rediscovery. An admin authorizes the device via `POST /assets/{id}/authorize`, which resolves the finding |
-| N17 | Compliance on the dashboard | The average is taken over each asset's latest evaluated run (deep or agentless). The asset page names the source of its score |
-| N18 | Score precision | One decimal place (75.0, 60.7); the docs' worked example rounds to 75 |
-| N19 | Brought forward from Phase 5 | Configuration controls (firewall, antivirus, unauthorized software, remove patch) and the `assessment_timeout` fault, because F needs them |
+| Doc | Contents |
+|---|---|
+| [docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md) | The 10-step demo walkthrough |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Processes, layering, simulation boundary, agent model, security, API conventions, simplifications |
+| [docs/SIMULATED_NETWORK.md](docs/SIMULATED_NETWORK.md) | Seed devices, topology, protocol behaviour |
+| [docs/DATA_MODEL.md](docs/DATA_MODEL.md) | ERD and tables |
+| [docs/ADAPTERS.md](docs/ADAPTERS.md) | Adapter interfaces, contract tests, replacement guide |
+| [docs/PROVENANCE.md](docs/PROVENANCE.md) | Field provenance and the provenance matrix |
+| [docs/STATE_MACHINES.md](docs/STATE_MACHINES.md) | All state machines and audit events |
+| [docs/FAILURE_MATRIX.md](docs/FAILURE_MATRIX.md) | Every failure: state, message, audit event, recovery, test |
+| [docs/RULES.md](docs/RULES.md) | Rule schema, condition language, evaluation order, scoring, drift |
+| [docs/DECISIONS.md](docs/DECISIONS.md) | Decisions log for every phase |
+| [docs/TESTING_D_G.md](docs/TESTING_D_G.md), [docs/TESTING_E_F.md](docs/TESTING_E_F.md) | Manual test guides |
+| Swagger (`/docs`) | The live, generated OpenAPI contract (source of truth) |
+
+## Repository layout
+
+```
+docker-compose.yml   api · agent-runtime · telemetry-sim · web (+ volume otprobe-data)
+backend/app/         api/ (v1 + sim) · services/ · engines/ · adapters/ (base + simulated) · sim/ · workflow/ · models/
+backend/alembic/     migrations 0001–0004
+backend/tests/       unit · contract · acceptance (A–K) · e2e (Playwright)
+agent/               simulated Probe Agent runtime (separate process)
+telemetry/           telemetry simulator (separate process)
+frontend/            React + Vite + TypeScript console
+rules/               compliance, telemetry, network, classification and eligibility rules (data) + schema.json
+scripts/             try_d_g.sh, try_e_f.sh
+docs/                design and operating documentation
+```

@@ -4,10 +4,11 @@ from fastapi import APIRouter, Body, Depends, Query
 from fastapi.responses import Response
 
 from app import schemas
-from app.api.deps import CursorQ, LimitQ, any_user, current_agent, get_ctx
+from app.api.deps import CursorQ, LimitQ, admin_only, any_user, current_agent, get_ctx, operator_or_admin
 from app.context import AppContext
+from app.core.idempotency import Idempotency, require_idempotency
 from app.core.principal import CurrentAgent, CurrentUser
-from app.services import agents, assessments
+from app.services import agents, assessments, removals
 
 router = APIRouter(tags=["agents"])
 
@@ -30,6 +31,47 @@ async def list_heartbeats(agent_id: str, limit: int = LimitQ, cursor: str | None
                           user: CurrentUser = Depends(any_user), ctx: AppContext = Depends(get_ctx)):
     with ctx.db.session() as s:
         return agents.heartbeats(s, agent_id, limit, cursor)
+
+
+@router.post("/agents/{agent_id}/removals", status_code=201, response_model=schemas.Removal,
+             summary="Request agent removal / rollback (operator/admin). Creates a PENDING approval.")
+async def request_removal(agent_id: str, body: schemas.RemovalCreate | None = None,
+                          user: CurrentUser = Depends(operator_or_admin),
+                          idem: Idempotency = Depends(require_idempotency), ctx: AppContext = Depends(get_ctx)):
+    purpose = body.purpose if body else "Decommission POC agent"
+    return idem.execute(ctx.db, 201, lambda s: removals.request(ctx, s, agent_id, user, purpose))
+
+
+@router.post("/agents/{agent_id}/restart", summary="Restart the agent service via WinRM (recovery for a crash)")
+async def restart(agent_id: str, user: CurrentUser = Depends(operator_or_admin), ctx: AppContext = Depends(get_ctx)):
+    return await removals.restart_agent(ctx, agent_id, user)
+
+
+@router.get("/removals", response_model=schemas.Page[schemas.Removal], tags=["agents"])
+async def list_removals(limit: int = LimitQ, cursor: str | None = CursorQ, user: CurrentUser = Depends(any_user),
+                        ctx: AppContext = Depends(get_ctx)):
+    with ctx.db.session() as s:
+        return removals.list_removals(s, user, limit, cursor)
+
+
+@router.get("/removals/{removal_id}", response_model=schemas.Removal, tags=["agents"])
+async def get_removal(removal_id: str, user: CurrentUser = Depends(any_user), ctx: AppContext = Depends(get_ctx)):
+    with ctx.db.session() as s:
+        return removals.get(s, user, removal_id)
+
+
+@router.post("/removals/{removal_id}/start", status_code=202, response_model=schemas.Removal, tags=["agents"],
+             summary="Start the approved rollback (requester or admin)")
+async def start_removal(removal_id: str, user: CurrentUser = Depends(operator_or_admin),
+                        idem: Idempotency = Depends(require_idempotency), ctx: AppContext = Depends(get_ctx)):
+    return idem.execute(ctx.db, 202, lambda s: removals.start(ctx, s, removal_id, user))
+
+
+@router.post("/removals/{removal_id}/retry", status_code=202, response_model=schemas.Removal, tags=["agents"],
+             summary="Retry a FAILED rollback under the same approval (admin)")
+async def retry_removal(removal_id: str, user: CurrentUser = Depends(admin_only),
+                        idem: Idempotency = Depends(require_idempotency), ctx: AppContext = Depends(get_ctx)):
+    return idem.execute(ctx.db, 202, lambda s: removals.start(ctx, s, removal_id, user, retry=True))
 
 
 # ---------------------------------------------------------------- called BY agents (outbound only)

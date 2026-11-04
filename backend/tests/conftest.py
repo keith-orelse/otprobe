@@ -23,6 +23,8 @@ TEST_SPEED = 0.002
 BOTH_SUBNETS = ["192.168.20.0/24", "192.168.10.0/24"]
 PASSWORDS = {"operator": "operator-demo", "approver": "approver-demo", "admin": "admin-demo"}
 AGENT_DIR = Path(__file__).resolve().parents[2] / "agent"
+TELEMETRY_DIR = Path(__file__).resolve().parents[2] / "telemetry"
+SIM_HEADERS = {"X-Sim-Token": "change-me-sim-token"}
 
 
 class Harness:
@@ -147,6 +149,22 @@ def spawn_agent_runtime(api_url: str, log_path: Path) -> subprocess.Popen:
            "RUNTIME_POLL_SEC": "0.2", "TASK_POLL_WAIT_SEC": "1", "PYTHONUNBUFFERED": "1"}
     return subprocess.Popen([sys.executable, "-m", "otprobe_agent"], cwd=AGENT_DIR, env=env,
                             stdout=open(log_path, "w"), stderr=subprocess.STDOUT)
+
+
+def spawn_telemetry_sim(api_url: str, log_path: Path, interval: float = 0.2) -> subprocess.Popen:
+    env = {**os.environ, "OTPROBE_API_URL": api_url, "SIM_SERVICE_TOKEN": "change-me-sim-token",
+           "TELEMETRY_INTERVAL_SEC": str(interval), "PYTHONUNBUFFERED": "1"}
+    return subprocess.Popen([sys.executable, "-m", "otprobe_telemetry"], cwd=TELEMETRY_DIR, env=env,
+                            stdout=open(log_path, "w"), stderr=subprocess.STDOUT)
+
+
+@pytest.fixture
+async def h_fast(db_path: Path):
+    """In-process app with telemetry staleness windows scaled down (30 s -> 1.5 s)."""
+    app = create_app(make_settings(db_path, telemetry_time_scale=0.05, heartbeat_interval_sec=1.0))
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+            yield await Harness(app, client).login("operator")
 
 
 @contextlib.asynccontextmanager

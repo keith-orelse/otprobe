@@ -53,6 +53,12 @@ export function useServerEvents(): void {
         qc.invalidateQueries({ queryKey: ["asset"] });
         qc.invalidateQueries({ queryKey: ["dashboard"] });
       }
+      if (topic === "removal") {
+        qc.invalidateQueries({ queryKey: ["removals"] });
+        qc.invalidateQueries({ queryKey: ["agents"] });
+      }
+      if (topic === "telemetry") qc.invalidateQueries({ queryKey: ["telemetry"] });
+      if (topic === "demo") qc.invalidateQueries();
       if (topic === "agent") {
         qc.invalidateQueries({ queryKey: ["agents"] });
         if (e.type !== "agent.heartbeat") qc.invalidateQueries({ queryKey: ["asset"] });
@@ -61,7 +67,8 @@ export function useServerEvents(): void {
     const types = ["discovery.status", "discovery.progress", "discovery.device_found", "discovery.step",
       "asset.updated", "asset.rogue", "probe.status", "probe.step", "audit.event", "deployment.status",
       "deployment.step", "deployment.precheck", "approval.status", "agent.status", "agent.heartbeat",
-      "assessment.status", "finding.status", "finding.updated", "drift.detected", "task.status"];
+      "assessment.status", "finding.status", "finding.updated", "drift.detected", "task.status",
+      "removal.status", "removal.step", "telemetry.message", "demo.reset"];
     connect();
     return () => { closed = true; window.clearTimeout(retry); es?.close(); };
   }, [qc]);

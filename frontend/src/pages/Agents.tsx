@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { apiGet } from "../api";
-import { ErrorBox, Panel, Pill, time } from "../components/ui";
-import type { Agent, HeartbeatRecord, Page } from "../types";
+import { apiAction, apiGet } from "../api";
+import { ErrorBox, Panel, Pill, StepList, time } from "../components/ui";
+import type { Agent, HeartbeatRecord, Page, Removal } from "../types";
 
 /** Seconds since the last heartbeat, ticking locally between server refreshes (display only). */
 function useSince(ts: string | null): number | null {
@@ -46,6 +46,16 @@ export function Agents() {
 
 export function AgentDetail() {
   const { id = "" } = useParams();
+  const nav = useNavigate();
+  const qc = useQueryClient();
+  const remove = useMutation({
+    mutationFn: () => apiAction<Removal>(`/agents/${id}/removals`, { purpose: "Decommission POC agent" }),
+    onSuccess: (r) => nav(`/removals/${r.id}`),
+  });
+  const restart = useMutation({
+    mutationFn: () => apiAction<{ message: string }>(`/agents/${id}/restart`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["agents"] }),
+  });
   const a = useQuery({ queryKey: ["agents", id], queryFn: () => apiGet<Agent>(`/agents/${id}`), refetchInterval: 2000 });
   const hb = useQuery({ queryKey: ["agents", id, "hb"], queryFn: () => apiGet<Page<HeartbeatRecord>>(`/agents/${id}/heartbeats`, { limit: 20 }),
     refetchInterval: 2000 });
@@ -55,7 +65,24 @@ export function AgentDetail() {
   return (
     <div className="page">
       <div className="crumbs"><Link to="/agents">Agents</Link> / {ag.id.slice(0, 8)}</div>
-      <h1>Probe Agent {ag.id.slice(0, 8)} on <Link to={`/assets/${ag.assetId}`}>{ag.assetName}</Link> <Pill value={ag.status} /></h1>
+      <div className="asset-head">
+        <h1>Probe Agent {ag.id.slice(0, 8)} on <Link to={`/assets/${ag.assetId}`}>{ag.assetName}</Link> <Pill value={ag.status} /></h1>
+        <div className="actions">
+          <div className="action-with-reason">
+            <button className="btn" disabled={!ag.actions.restart?.enabled || restart.isPending} title={ag.actions.restart?.reason}
+              onClick={() => restart.mutate()}>RESTART AGENT SERVICE</button>
+            <div className="reason reason-ok">{ag.actions.restart?.reason}</div>
+          </div>
+          <div className="action-with-reason">
+            <button className="btn" disabled={!ag.actions.remove?.enabled || remove.isPending} title={ag.actions.remove?.reason}
+              onClick={() => remove.mutate()}>REMOVE AGENT</button>
+            <div className={ag.actions.remove?.enabled ? "reason reason-ok" : "reason"}>{ag.actions.remove?.reason}</div>
+            {ag.removalId && <Link to={`/removals/${ag.removalId}`} className="small">removal →</Link>}
+          </div>
+        </div>
+      </div>
+      <ErrorBox error={remove.error ?? restart.error} />
+      {restart.data && <div className="note">{restart.data.message}</div>}
       <div className="grid-2">
         <Panel title="Agent">
           <table className="kv"><tbody>
@@ -76,6 +103,59 @@ export function AgentDetail() {
                 <td className="mono">{time(h.agentTime)}</td>
                 <td className="mono small">{Object.entries(h.payload).filter(([, v]) => v != null).map(([k, v]) => `${k}=${v}`).join("  ")}</td></tr>))}
             </tbody></table>
+        </Panel>
+      </div>
+    </div>
+  );
+}
+
+export function RemovalDetail() {
+  const { id = "" } = useParams();
+  const qc = useQueryClient();
+  const q = useQuery({ queryKey: ["removals", id], queryFn: () => apiGet<Removal>(`/removals/${id}`) });
+  const act = useMutation({
+    mutationFn: (verb: "start" | "retry") => apiAction<Removal>(`/removals/${id}/${verb}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["removals"] }),
+  });
+  if (q.error) return <ErrorBox error={q.error} />;
+  const r = q.data;
+  if (!r) return <div className="muted">Loading…</div>;
+  return (
+    <div className="page">
+      <div className="crumbs"><Link to="/agents">Agents</Link> / <Link to={`/agents/${r.agentId}`}>{r.agentId.slice(0, 8)}</Link> / removal</div>
+      <div className="asset-head">
+        <div>
+          <h1>Remove agent from <Link to={`/assets/${r.assetId}`}>{r.assetName}</Link> <Pill value={r.status} /></h1>
+          <div className="meta"><span>requested by {r.requestedBy}</span><span>{time(r.createdAt)}</span>
+            <span className="mono">correlation {r.correlationId}</span></div>
+        </div>
+        <div className="actions">
+          <div className="action-with-reason">
+            <button className="btn btn-primary" disabled={!r.actions.start?.enabled || act.isPending}
+              onClick={() => act.mutate("start")}>START ROLLBACK</button>
+            <div className={r.actions.start?.enabled ? "reason reason-ok" : "reason"}>{r.actions.start?.reason}</div>
+          </div>
+          {r.status === "FAILED" && <div className="action-with-reason">
+            <button className="btn" disabled={!r.actions.retry?.enabled || act.isPending} onClick={() => act.mutate("retry")}>RETRY</button>
+            <div className="reason">{r.actions.retry?.reason}</div>
+          </div>}
+        </div>
+      </div>
+      <ErrorBox error={act.error} />
+      {r.failureCode && <div className="error-box"><b>{r.failureCode}</b>: {r.failureDetail}</div>}
+      <div className="grid-2">
+        <Panel title="Approval">
+          {r.approval && <table className="kv"><tbody>
+            <tr><th>Status</th><td><Pill value={r.approval.status} /></td></tr>
+            <tr><th>Purpose</th><td>{r.purpose}</td></tr>
+            <tr><th>Decision</th><td>{r.approval.decidedBy ? `${r.approval.status.toLowerCase()} by ${r.approval.decidedBy}` : "—"}</td></tr>
+            {r.approval.status === "PENDING" && <tr><td colSpan={2}><Link to="/approvals">Go to approvals →</Link></td></tr>}
+          </tbody></table>}
+          <p className="hint">Rollback never deletes assessment history, findings, deployments or audit logs. If a step fails,
+            the agent identity is revoked anyway.</p>
+        </Panel>
+        <Panel title="Rollback steps">
+          {r.steps.length ? <StepList steps={r.steps} /> : <p className="muted">Starts after approval.</p>}
         </Panel>
       </div>
     </div>

@@ -37,6 +37,7 @@ def zones_for_targets(session, targets: list[str]) -> dict[str, Zone]:
 
 def baseline_zone_ids(session, zones: list[Zone], exclude_job: str) -> set[str]:
     done = list(session.scalars(select(DiscoveryJob).where(DiscoveryJob.status == "COMPLETED",
+                                                            DiscoveryJob.archived.is_(False),
                                                             DiscoveryJob.id != exclude_job)))
     out = set()
     for z in zones:

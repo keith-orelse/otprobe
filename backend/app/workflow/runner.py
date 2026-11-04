@@ -32,6 +32,9 @@ class JobRunner:
         task.cancel()
         return True
 
+    def active(self) -> list[str]:
+        return list(self._tasks)
+
     def is_running(self, key: str) -> bool:
         return key in self._tasks
 

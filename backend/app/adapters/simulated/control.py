@@ -3,12 +3,23 @@ from __future__ import annotations
 from typing import Any, Mapping
 
 from app.adapters.base import SimulationControl
+from app.sim.seed import reset_world
 from app.sim.world import SimWorld
 
 
 class SimulatedControl(SimulationControl):
-    def __init__(self, world: SimWorld) -> None:
-        self.world = world
+    def __init__(self, world: SimWorld, broker=None) -> None:
+        self.world, self.broker = world, broker
+
+    def inject_rogue(self) -> dict:
+        d = self.world.inject_rogue()
+        return {"deviceId": d.device_id, "ip": d.ip, "mac": d.mac}
+
+    def reset(self) -> None:
+        with self.world.db.session() as s:
+            reset_world(s)
+        if self.broker is not None:
+            self.broker.clear()
 
     def devices(self) -> list[dict[str, Any]]:
         out = []
@@ -35,6 +46,12 @@ class SimulatedControl(SimulationControl):
         if self.world.device(device_id) is None:
             raise KeyError(device_id)
         self.world.set_fault(device_id, fault, dict(params), set_by)
+        if fault == "agent_crashed":   # the process died: the service shows Stopped until restarted
+            def stop(state: dict) -> None:
+                for svc in state.get("services", []):
+                    if svc["name"] == "OTProbeAgent":
+                        svc["state"] = "stopped"
+            self.world.update_state(device_id, stop)
 
     def clear_fault(self, device_id: str, fault: str) -> None:
         if self.world.device(device_id) is None:

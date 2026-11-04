@@ -14,6 +14,8 @@ services:
     environment:
       <<: *sim-env
       ASSESSMENT_INTERVAL_SEC: ${ASSESSMENT_INTERVAL_SEC:-300}
+      ASSESSMENT_TIMEOUT_SEC: ${ASSESSMENT_TIMEOUT_SEC:-120}
+      ENROLLMENT_TIMEOUT_SEC: ${ENROLLMENT_TIMEOUT_SEC:-120}
       DATABASE_URL: sqlite:////data/otprobe.db
       ADAPTER_MODE: simulated
       JWT_SECRET: ${JWT_SECRET:-change-me-demo-jwt-secret-at-least-32-bytes}
@@ -40,10 +42,12 @@ services:
     restart: unless-stopped
 
   telemetry-sim:
+    # Simulated MQTT publishers (sensors, PLC status). Separate process; publishes via the in-process broker.
     build: { context: ., dockerfile: telemetry/Dockerfile }
     environment:
       <<: *sim-env
       OTPROBE_API_URL: http://api:8000
+      TELEMETRY_INTERVAL_SEC: ${TELEMETRY_INTERVAL_SEC:-5}
     depends_on: { api: { condition: service_healthy } }
     restart: unless-stopped
 

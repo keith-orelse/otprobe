@@ -40,6 +40,7 @@ async def agent_installs(request: Request) -> list[dict[str, Any]]:
         svc = next((s for s in d.state.get("services", []) if s["name"] == "OTProbeAgent"), None)
         out.append({"deviceId": d.device_id, "hostname": d.hostname, "ip": d.ip,
                     "serviceState": svc["state"] if svc else "missing", "version": files["agent"]["version"],
+                    "deploymentId": (files.get("enroll_bundle") or {}).get("deploymentId"),
                     "online": d.online, "faults": sorted(d.faults)})
     return out
 
@@ -66,6 +67,38 @@ async def os_state(device_id: str, request: Request) -> dict[str, Any]:
     d = _host(request, device_id)
     state = {k: v for k, v in d.state.items() if k not in ("accounts", "files", "snmp", "winrm", "ssh")}
     return {"deviceId": d.device_id, "online": d.online, "faults": sorted(d.faults), "state": state}
+
+
+@router.get("/telemetry/sources", dependencies=[Depends(sim_auth)])
+async def telemetry_sources(request: Request) -> list[dict[str, Any]]:
+    """Physical state of every MQTT publisher (for the telemetry simulator)."""
+    world = _world(request)
+    out = []
+    for c in world.mqtt_clients():
+        d = world.device(c["device_id"])
+        override = (d.faults.get("sensor_value_override") or {}).get("value") if d else None
+        out.append({"clientId": c["client_id"], "deviceId": c["device_id"], "topics": c["topics"],
+                    "online": bool(d and d.online and c["connected"]), "override": override})
+    return out
+
+
+class Publish(BaseModel):
+    clientId: str
+    topic: str
+    payload: Any
+
+
+@router.post("/mqtt/publish", dependencies=[Depends(sim_auth)], status_code=202)
+async def publish(body: Publish, request: Request) -> dict[str, str]:
+    world, broker = _world(request), request.app.state.ctx.extras["broker"]
+    client = next((c for c in world.mqtt_clients() if c["client_id"] == body.clientId), None)
+    if client is None or body.topic not in client["topics"]:
+        raise ProblemError(403, "not-authorized", "Client may not publish to this topic")
+    device = world.device(client["device_id"])
+    if device is None or not device.online:
+        raise ProblemError(409, "client-offline", "Publisher is offline")
+    await broker.publish(body.topic, body.payload, body.clientId)
+    return {"status": "published"}
 
 
 class AgentIdentity(BaseModel):

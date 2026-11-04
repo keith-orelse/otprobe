@@ -64,7 +64,7 @@ stateDiagram-v2
 | ENROLLING → FAILED | Enrollment rejected, or no heartbeat within `ENROLLMENT_TIMEOUT_SEC` |
 
 `FAILED` and `REJECTED` are terminal. **Retry** creates a new deployment with `retry_of_id` set, which needs a new
-approval (see open question Q3).
+approval (decision Q3, accepted; see [DECISIONS.md](DECISIONS.md)).
 
 The UI enables **Deploy Agent** only when `status == PRECHECK_PASSED`. The API enforces the same rule
 independently.
@@ -127,7 +127,7 @@ stateDiagram-v2
 ```
 
 `REJECTED` and `FAILED → RUNNING` (admin-only retry under the same approval) are **additions** to the brief.
-See open question Q4.
+Decision Q4, accepted.
 
 Steps (kind `REMOVAL`): `STOP_ASSESSMENTS → CONNECT → STOP_AGENT → UNINSTALL → REVOKE_IDENTITY →
 REMOVE_TEMP_FILES → VALIDATE_DEVICE → ROLLBACK_COMPLETED`.
@@ -180,9 +180,9 @@ Driven by rule results for (asset, rule):
 3. Truncates the OTProbe knowledge tables. Discovery jobs/observations are kept if
    `clearDiscoveryHistory=false`. Users are kept.
 4. Re-seeds `sim_*`, packages, vault profiles, zones and policies.
-5. Appends `POC_RESET` to the **retained** audit log (see open question Q2).
+5. Appends `POC_RESET` to the **retained** audit log (decision Q2, accepted; see [DECISIONS.md](DECISIONS.md)).
 
-Result: no agents installed. The only findings are "baseline" findings (see open question Q1).
+Result: no agents installed. The only findings are "baseline" findings (decision Q1, accepted; see [DECISIONS.md](DECISIONS.md)).
 
 ## 8. Audit event catalogue (excerpt)
 

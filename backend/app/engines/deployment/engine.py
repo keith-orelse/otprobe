@@ -18,6 +18,7 @@ from app.core.clock import utcnow
 from app.core.correlation import get_correlation_id
 from app.core.security import opaque_token
 from app.engines.inventory import effective_fields
+from app.engines.protocol_events import winrm_event
 from app.models import Agent, Asset, Deployment, EnrollmentToken, Package, PrecheckResult
 from app.workflow.machine import AGENT, DEPLOYMENT
 from app.workflow.steps import StepTracker
@@ -90,6 +91,8 @@ class DeploymentEngine:
         hc = await winrm.health_check(Target(ip, port=5986))
         record("WINRM_AVAILABLE", "PASS" if hc.ok else "FAIL",
                f"HTTPS listener on {ip}:5986" if hc.ok else (hc.error_detail or hc.status.value))
+        if not hc.ok:
+            self._audit(dep_id, winrm_event(hc.status), hc.error_detail)
 
         session: RemoteSession | None = None
         if hc.ok:
@@ -97,6 +100,8 @@ class DeploymentEngine:
             res, session = await winrm.open_session(Target(ip, port=5986, credential=cred))
             record("AUTHENTICATION", "PASS" if session else "FAIL",
                    f"Authenticated as {cred.username} (profile {profile})" if session else res.error_detail or "")
+            if session is None:
+                self._audit(dep_id, winrm_event(res.status), res.error_detail)
         else:
             record("AUTHENTICATION", "FAIL", "WinRM not available")
 
@@ -145,6 +150,10 @@ class DeploymentEngine:
                 dep.precheck_passed_at = utcnow()
                 DEPLOYMENT.transition(s, dep, "PRECHECK_PASSED", ACTOR, details={"runNo": run_no})
 
+    def _audit(self, dep_id: str, event: str, detail: str | None) -> None:
+        with self.ctx.db.session() as s:
+            audit.record(s, ACTOR, event, "deployment", dep_id, {"message": detail})
+
     # ------------------------------------------------------------------ deploy
     async def deploy(self, dep_id: str) -> None:
         tracker = StepTracker(self.ctx.db, "DEPLOY", dep_id, "deployment")
@@ -187,7 +196,7 @@ class DeploymentEngine:
         hc = await winrm.health_check(Target(ip, port=5986))
         if not hc.ok:
             return self._fail(dep_id, tracker, "CONNECT", "CONNECT_FAILED", hc.error_detail or hc.status.value,
-                              f"WINRM_{hc.status.value}")
+                              winrm_event(hc.status))
         tracker.ok("CONNECT", f"TCP {ip}:5986 reachable through fw-conduit-01")
 
         tracker.start("WINRM_SESSION", "Opening WinRM session")
@@ -201,7 +210,7 @@ class DeploymentEngine:
         res, session = await winrm.open_session(Target(ip, port=5986, credential=cred), on_stage)
         if session is None:
             return self._fail(dep_id, tracker, "WINRM_SESSION", f"WINRM_{res.status.value}",
-                              res.error_detail or res.status.value, f"WINRM_{res.status.value}")
+                              res.error_detail or res.status.value, winrm_event(res.status))
         tracker.ok("WINRM_SESSION", f"Session created as {cred.username} (vault profile {profile})", {"stages": stages})
 
         try:

@@ -99,7 +99,8 @@ export interface Deployment { id: string; assetId: string; assetName: string | n
 export interface Agent { id: string; assetId: string; assetName: string | null; deploymentId: string; status: string;
   version: string; credentialPrefix: string | null; installedAt: string; enrolledAt: string | null;
   lastHeartbeatAt: string | null; secondsSinceHeartbeat: number | null; missedHeartbeats: number;
-  heartbeatIntervalSec: number; revokedAt: string | null; removedAt: string | null }
+  heartbeatIntervalSec: number; revokedAt: string | null; removedAt: string | null;
+  actions: Record<string, ActionState>; removalId: string | null }
 
 export interface HeartbeatRecord { seq: number; receivedAt: string; agentTime: string | null;
   payload: Record<string, any> }
@@ -147,3 +148,15 @@ export interface Comparison { assetId: string; assetName: string; hasDeepEvidenc
 export interface MonitoringRow { assetId: string; assetName: string; agentId: string; agentStatus: string;
   secondsSinceHeartbeat: number | null; lastAssessmentAt: string | null; nextAssessmentAt: string | null;
   score: number | null; unknown: number; openFindings: number }
+
+export interface Removal { id: string; assetId: string; assetName: string | null; agentId: string; status: string;
+  purpose: string; requestedBy: string; approval: Approval | null; failureCode: string | null;
+  failureDetail: string | null; correlationId: string; createdAt: string; startedAt: string | null;
+  finishedAt: string | null; steps: WorkflowStep[]; actions: Record<string, ActionState> }
+
+export interface TelemetryTopic { topic: string; clientId: string; assetId: string | null; assetName: string | null;
+  lastPayload: any; lastAt: string; messages: number; openFindings: string[];
+  recent: { at: string; payload: Record<string, any> }[] }
+
+export interface DemoResetResult { status: string; cleared: Record<string, number>; discoveryHistory: string;
+  agentsRevoked: number }
