@@ -69,7 +69,8 @@ export interface DashboardSummary { assets: Record<string, number>; assetsByLeve
   recentEvents: AuditEvent[]; adapters: { protocol: string; implementation: string; simulated: boolean; label: string }[];
   openFindings: Record<string, number>; complianceAvg: number | null; unknownTotal: number; monitoring: MonitoringRow[];
   recentDrift: DriftEvent[]; recentChanges: { assetId: string; assetName: string | null; path: string; before: any;
-    after: any; detectedAt: string; runId: string }[] }
+    after: any; detectedAt: string; runId: string }[]; assetsByLevelType: Record<string, Record<string, number>>;
+  pendingApprovals: number; agents: Record<string, number> }
 
 export interface SseEvent { id: number; type: string; ts: string; correlationId: string | null;
   entity: { kind: string; id: string | null }; data: Record<string, any> }
@@ -160,3 +161,6 @@ export interface TelemetryTopic { topic: string; clientId: string; assetId: stri
 
 export interface DemoResetResult { status: string; cleared: Record<string, number>; discoveryHistory: string;
   agentsRevoked: number }
+
+export interface NavCounts { pendingApprovals: number; openFindings: number; criticalFindings: number;
+  agentsAttention: number; rogueAssets: number; runningWorkflows: number }

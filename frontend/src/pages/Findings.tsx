@@ -1,21 +1,21 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { apiAction, apiGet } from "../api";
 import { ErrorBox, Pager, Panel, Pill, time, Value } from "../components/ui";
 import type { Finding, Page } from "../types";
 
 export function Findings() {
   const nav = useNavigate();
-  const [status, setStatus] = useState("OPEN,REOPENED");
-  const [severity, setSeverity] = useState("");
+  const [params] = useSearchParams();
+  const [status, setStatus] = useState(params.get("status") ?? "OPEN,REOPENED");
+  const [severity, setSeverity] = useState(params.get("severity") ?? "");
   const [source, setSource] = useState("");
   const [cursor, setCursor] = useState<string | null>(null);
   const q = useQuery({ queryKey: ["findings", status, severity, source, cursor],
     queryFn: () => apiGet<Page<Finding>>("/findings", { status, severity, source, cursor, limit: 100 }) });
   return (
     <div className="page">
-      <h1>Findings</h1>
       <div className="toolbar">
         <select value={status} onChange={(e) => { setStatus(e.target.value); setCursor(null); }}>
           <option value="OPEN,REOPENED">Open + reopened</option><option value="">All statuses</option>

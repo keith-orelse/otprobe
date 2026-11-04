@@ -21,11 +21,11 @@ D in [TESTING_D_G.md](TESTING_D_G.md): discover → probe → request → approv
 
 | # | As | Do | Expect |
 |---|---|---|---|
-| 1 | operator | **Assets** → 192.168.20.13 | A "Compliance · Windows Engineering Baseline" panel appears under the agent strip |
-| 2 | operator | RUN DEEP ASSESSMENT | Terminal 3 logs `task … RUN_ASSESSMENT` and `evidence uploaded`. The panel shows **75%**, *7 pass · 2 fail · 1 warning · 1 unknown*, and 3 open findings |
-| 3 | operator | Click **last run →** | All 11 rules with observed/expected values. Mixed results: WIN-PATCH-001 FAIL (2 missing), WIN-ADM-001 FAIL (3 admins), WIN-SW-001 WARNING (`RemoteTool Demo`), WIN-USB-001 UNKNOWN ("evidence 'usb.storage_policy' not present"), the rest PASS. *Show uploaded evidence* shows the document the agent sent |
+| 1 | operator | **Assets** → 192.168.20.13 | With an agent present, the header shows **RUN DEEP ASSESSMENT**; the **Compliance** tab holds the score panel |
+| 2 | operator | RUN DEEP ASSESSMENT (header) | Terminal 3 logs `task … RUN_ASSESSMENT` and `evidence uploaded`. The panel shows **75%**, *7 pass · 2 fail · 1 warning · 1 unknown*, and 3 open findings |
+| 3 | operator | **Compliance** tab → **last run →** | All 11 rules with observed/expected values. Mixed results: WIN-PATCH-001 FAIL (2 missing), WIN-ADM-001 FAIL (3 admins), WIN-SW-001 WARNING (`RemoteTool Demo`), WIN-USB-001 UNKNOWN ("evidence 'usb.storage_policy' not present"), the rest PASS. *Show uploaded evidence* shows the document the agent sent |
 | 4 | any | **Findings** | 3 deep-agent findings on eng-ws-01 (HIGH WIN-PATCH-001, MEDIUM WIN-SW-001, MEDIUM WIN-ADM-001). If you probed eng-ws-02, there is also an AGENTLESS finding: WIN-OS-001 (Windows 10 is unsupported) |
-| 5 | any | Asset page → **Agentless vs Deep Agent →** | Applications *Partial 4* vs *Full*, "Only visible to the agent: … RemoteTool Demo". Firewall *Available* vs *Detailed*. Local admins *Not collected* vs *Collected*. Security policies *Limited* vs *Collected*. Continuous monitoring *No* vs *Yes*. Heartbeat *N/A* vs *Yes* |
+| 5 | any | Asset page → **Agentless vs Deep** tab | Applications *Partial 4* vs *Full*, "Only visible to the agent: … RemoteTool Demo". Firewall *Available* vs *Detailed*. Local admins *Not collected* vs *Collected*. Security policies *Limited* vs *Collected*. Continuous monitoring *No* vs *Yes*. Heartbeat *N/A* vs *Yes* |
 | 6 | any | `rules/windows_engineering_baseline.yaml` | The rules that produced all of the above. Swagger `GET /api/v1/policies` shows the loaded version |
 
 ## F: drift → finding → resolved → reopened

@@ -32,7 +32,6 @@ export function DemoControls() {
   });
   return (
     <div className="page">
-      <h1>SIMULATION CONTROLS</h1>
       <div className="note">These controls change the <b>simulated</b> world only. OTProbe notices the effect the way a real
         product would: through probes, precheck, deployment and agent heartbeats. Admin only. Every change is audited.
         Every failure here is documented in docs/FAILURE_MATRIX.md (result, message, audit event, recovery).</div>

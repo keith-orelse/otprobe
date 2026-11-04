@@ -27,7 +27,6 @@ export function Discovery() {
 
   return (
     <div className="page">
-      <h1>Discovery</h1>
       <Panel title="New discovery job">
         <div className="form-row">
           <fieldset><legend>Targets (simulated zones only)</legend>

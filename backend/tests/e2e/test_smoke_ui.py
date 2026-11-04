@@ -62,12 +62,12 @@ async def test_main_journey(db_path, tmp_path):
                     await page.get_by_label("Username").fill(user)
                     await page.get_by_label("Password").fill(PW[user])
                     await page.get_by_role("button", name="SIGN IN").click()
-                    await page.wait_for_selector(".user-box")
+                    await page.wait_for_selector(".user-profile")
 
                 async def open_asset(ip: str) -> None:
                     await page.goto(f"{ui}/assets")
                     await page.get_by_text(ip, exact=True).click()
-                    await page.wait_for_selector(".asset-head")
+                    await page.wait_for_selector(".asset-hero")
 
                 await login("operator")
                 await expect(page.locator(".sim-banner")).to_have_text(
@@ -81,7 +81,7 @@ async def test_main_journey(db_path, tmp_path):
                 await page.wait_for_selector("text=Windows Engineering Workstation", timeout=60000)
                 await open_asset("192.168.10.10")
                 await page.get_by_role("button", name="RUN AGENTLESS PROBE").click()
-                await expect(page.locator(".reason").first).to_have_text(
+                await expect(page.locator(".deploy-action .reason")).to_have_text(
                     "Traditional PLCs are handled agentless/read-only in this POC.", timeout=60000)
                 await expect(page.get_by_role("button", name="DEPLOY AGENT")).to_be_disabled()
 
@@ -105,7 +105,9 @@ async def test_main_journey(db_path, tmp_path):
                 run = page.get_by_role("button", name="RUN DEEP ASSESSMENT")
                 await expect(run).to_be_enabled(timeout=30000)
                 await run.click()
-                await expect(page.locator(".compliance")).to_contain_text("75", timeout=60000)
+                await expect(page.locator(".hero-facts")).to_contain_text("75", timeout=60000)
+                await page.get_by_role("tab", name="Compliance").click()
+                await expect(page.locator(".compliance")).to_contain_text("7 pass")
                 await page.goto(f"{ui}/findings")
                 await page.wait_for_selector("text=WIN-PATCH-001")
                 await page.goto(f"{ui}/telemetry")

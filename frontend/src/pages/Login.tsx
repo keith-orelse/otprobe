@@ -2,6 +2,7 @@ import { FormEvent, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { apiLogin } from "../api";
 import { setToken } from "../auth";
+import { Logo } from "../components/Logo";
 import { ErrorBox } from "../components/ui";
 
 export function Login() {
@@ -24,8 +25,9 @@ export function Login() {
   return (
     <div className="login-wrap">
       <div className="sim-banner" role="status">SIMULATED ENVIRONMENT - NO REAL DEVICES ARE BEING SCANNED</div>
-      <form className="login panel" onSubmit={submit}>
-        <div className="brand">OT<span>Probe</span></div>
+      <form className="login" onSubmit={submit}>
+        <Logo />
+        <div className="project-title">OT Discovery &amp; Probing Console</div>
         <label>Username<input autoFocus autoComplete="username" value={username} onChange={(e) => setUsername(e.target.value)} /></label>
         <label>Password<input type="password" autoComplete="current-password" value={password}
           onChange={(e) => setPassword(e.target.value)} /></label>

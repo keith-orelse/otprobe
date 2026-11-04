@@ -2,7 +2,7 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
-import { Layout, NAV } from "./components/Layout";
+import { Layout } from "./components/Layout";
 import { AgentDetail, Agents, RemovalDetail } from "./pages/Agents";
 import { Approvals } from "./pages/Approvals";
 import { AssessmentDetail, Assessments } from "./pages/Assessments";
@@ -17,7 +17,6 @@ import { DeploymentDetail, Deployments } from "./pages/Deployments";
 import { Discovery } from "./pages/Discovery";
 import { Login } from "./pages/Login";
 import { NetworkMap } from "./pages/NetworkMap";
-import { Pending } from "./pages/Pending";
 import { Probes } from "./pages/Probes";
 import { Settings } from "./pages/Settings";
 import { Telemetry } from "./pages/Telemetry";
@@ -53,7 +52,6 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             <Route path="assets/:id/compare" element={<Compare />} />
             <Route path="removals/:id" element={<RemovalDetail />} />
             <Route path="telemetry" element={<Telemetry />} />
-            {NAV.filter((n) => n.phase).map((n) => <Route key={n.to} path={n.to.slice(1)} element={<Pending />} />)}
           </Route>
         </Routes>
       </BrowserRouter>

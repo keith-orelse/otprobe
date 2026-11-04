@@ -258,6 +258,18 @@ class DashboardSummary(Camel):
     monitoring: list["MonitoringRow"] = []
     recent_drift: list["DriftEvent"] = []
     recent_changes: list[dict[str, Any]] = []
+    assets_by_level_type: dict[str, dict[str, int]] = {}
+    pending_approvals: int = 0
+    agents: dict[str, int] = {}
+
+
+class NavCounts(Camel):
+    pending_approvals: int
+    open_findings: int
+    critical_findings: int
+    agents_attention: int
+    rogue_assets: int
+    running_workflows: int
 
 
 # ---------------------------------------------------------------- Phase 3: auth, approvals, deployment, agents

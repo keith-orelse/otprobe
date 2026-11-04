@@ -118,3 +118,14 @@ async def test_camelcase_list_filters_are_applied(discovered):
     assert (await h.get("/deployments", params={"assetId": plc["id"]}))["total"] == 0
     ev = (await h.get("/audit-events", params={"entityId": plc["id"], "limit": 200}))["items"]
     assert ev and all(e["entityId"] == plc["id"] for e in ev)
+
+
+async def test_nav_counts_and_dashboard_breakdowns(discovered):
+    h = discovered
+    await h.probe("192.168.20.14")          # agentless WIN-OS-001 finding (HIGH)
+    counts = await h.get("/nav/counts")
+    assert counts == {"pendingApprovals": 0, "openFindings": 1, "criticalFindings": 1, "agentsAttention": 0,
+                      "rogueAssets": 0, "runningWorkflows": 0}
+    dash = await h.get("/dashboard/summary")
+    assert dash["assetsByLevelType"]["2"]["Windows Engineering Workstation"] == 1
+    assert sum(sum(v.values()) for v in dash["assetsByLevelType"].values()) == 9

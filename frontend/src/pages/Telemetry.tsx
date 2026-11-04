@@ -20,7 +20,6 @@ export function Telemetry() {
     refetchInterval: 5000 });
   return (
     <div className="page">
-      <h1>MQTT Telemetry</h1>
       <p className="hint">In-process broker (simulated, logically on historian-01:8883). The separate telemetry simulator publishes;
         OTProbe subscribes to <span className="mono">factory/#</span>, attributes each publisher to an asset via the broker's client
         list, and evaluates <span className="mono">rules/telemetry.yaml</span>. Thresholds and staleness raise TELEMETRY findings.</p>

@@ -10,7 +10,6 @@ export function Probes() {
   const runs = useQuery({ queryKey: ["probes", "list"], queryFn: () => apiGet<Page<ProbeRun>>("/probes", { limit: 50 }) });
   return (
     <div className="page">
-      <h1>Agentless Probing</h1>
       <p className="hint">Probes run from an asset page (RUN AGENTLESS PROBE). Each protocol step and every collected
         field records its source.</p>
       <ErrorBox error={runs.error} />

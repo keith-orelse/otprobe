@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useSyncExternalStore } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { apiAction } from "./api";
 import type { SseEvent } from "./types";
@@ -9,6 +9,20 @@ const listeners = new Set<Listener>();
 export function onServerEvent(fn: Listener): () => void {
   listeners.add(fn);
   return () => listeners.delete(fn);
+}
+
+export type StreamStatus = "connecting" | "live" | "reconnecting";
+let status: StreamStatus = "connecting";
+const statusListeners = new Set<() => void>();
+function setStatus(next: StreamStatus): void {
+  if (next === status) return;
+  status = next;
+  statusListeners.forEach((l) => l());
+}
+
+/** Live connection state of the event stream (drives the "Live" indicator). */
+export function useStreamStatus(): StreamStatus {
+  return useSyncExternalStore((cb) => { statusListeners.add(cb); return () => statusListeners.delete(cb); }, () => status);
 }
 
 /** One EventSource for the whole console. SSE only signals; REST stays the source of truth. */
@@ -24,8 +38,13 @@ export function useServerEvents(): void {
         if (closed) return;
         es = new EventSource(`/api/v1/events/stream?ticket=${encodeURIComponent(ticket)}`);
         types.forEach((t) => es!.addEventListener(t, handle as EventListener));
-        es.onerror = () => { es?.close(); if (!closed) retry = window.setTimeout(connect, 3000); };
+        es.onopen = () => setStatus("live");
+        es.onerror = () => {
+          es?.close(); setStatus("reconnecting");
+          if (!closed) retry = window.setTimeout(connect, 3000);
+        };
       } catch {
+        setStatus("reconnecting");
         if (!closed) retry = window.setTimeout(connect, 3000);
       }
     };
@@ -33,6 +52,9 @@ export function useServerEvents(): void {
       const e = JSON.parse(msg.data) as SseEvent;
       listeners.forEach((l) => l(e));
       const topic = e.type.split(".")[0];
+      if (e.type !== "agent.heartbeat" && e.type !== "telemetry.message" && !e.type.endsWith(".step")) {
+        qc.invalidateQueries({ queryKey: ["nav"] });
+      }
       if (topic === "discovery") qc.invalidateQueries({ queryKey: ["discovery"] });
       if (topic === "asset" || e.type === "discovery.device_found" || e.type === "probe.status") {
         qc.invalidateQueries({ queryKey: ["assets"] });

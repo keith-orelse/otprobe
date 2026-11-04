@@ -24,7 +24,6 @@ export function Assessments() {
   const q = useQuery({ queryKey: ["assessments", "list"], queryFn: () => apiGet<Page<AssessmentRun>>("/assessments", { limit: 100 }) });
   return (
     <div className="page">
-      <h1>Assessments</h1>
       <p className="hint">Deep assessments run on the agent (it collects evidence; the server evaluates the data-driven
         rules in <span className="mono">rules/</span>). Agentless runs are evaluated after each probe using only rules that
         accept agentless evidence. Score = weighted pass rate, UNKNOWN excluded and shown separately.</p>

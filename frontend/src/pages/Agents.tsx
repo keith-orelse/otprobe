@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { apiAction, apiGet } from "../api";
 import { ErrorBox, Panel, Pill, StepList, time } from "../components/ui";
+import { Lifecycle } from "../components/visual";
 import type { Agent, HeartbeatRecord, Page, Removal } from "../types";
 
 /** Seconds since the last heartbeat, ticking locally between server refreshes (display only). */
@@ -23,7 +24,6 @@ export function Agents() {
     refetchInterval: 3000 });
   return (
     <div className="page">
-      <h1>Agents</h1>
       <p className="hint">Agents are outbound-only: they enroll, heartbeat and poll for tasks over HTTPS. The server
         never connects to them. STALE after 3 missed heartbeats, OFFLINE after 6.</p>
       <ErrorBox error={q.error} />
@@ -109,6 +109,21 @@ export function AgentDetail() {
   );
 }
 
+const REMOVAL_STAGES = [
+  { key: "requested", label: "Requested" }, { key: "approved", label: "Approval" },
+  { key: "rollback", label: "Rollback" }, { key: "done", label: "Agent removed" },
+];
+
+function removalStage(r: Removal): { current: number; failedAt?: number; failedLabel?: string } {
+  switch (r.status) {
+    case "REQUESTED": return { current: 1 };
+    case "REJECTED": return { current: 1, failedAt: 1, failedLabel: "Rejected" };
+    case "APPROVED": case "RUNNING": return { current: 2 };
+    case "FAILED": return { current: 2, failedAt: 2, failedLabel: "Rollback failed" };
+    default: return { current: 3 };
+  }
+}
+
 export function RemovalDetail() {
   const { id = "" } = useParams();
   const qc = useQueryClient();
@@ -141,6 +156,7 @@ export function RemovalDetail() {
           </div>}
         </div>
       </div>
+      <Lifecycle stages={REMOVAL_STAGES} {...removalStage(r)} />
       <ErrorBox error={act.error} />
       {r.failureCode && <div className="error-box"><b>{r.failureCode}</b>: {r.failureDetail}</div>}
       <div className="grid-2">

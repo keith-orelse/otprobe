@@ -10,7 +10,6 @@ export function Settings() {
   const dash = useQuery({ queryKey: ["dashboard"], queryFn: () => apiGet<DashboardSummary>("/dashboard/summary") });
   return (
     <div className="page">
-      <h1>Settings</h1>
       <Panel title="Network zones">
         <table className="dense"><thead><tr><th>Zone</th><th>CIDR</th><th>Default level</th><th>Safe mode</th><th>Scannable</th><th>Notes</th></tr></thead>
           <tbody>{zones.data?.map((z) => (

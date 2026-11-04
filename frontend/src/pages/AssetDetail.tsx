@@ -1,14 +1,26 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { apiAction, apiGet } from "../api";
 import { ago, ErrorBox, Panel, Pill, SourceBadge, StepList, time, Value } from "../components/ui";
 import type { Agent, AssessmentRun, AssetDetail as Asset, Deployment, Finding, Package, Page, ProbeRun } from "../types";
+import { DeviceIcon, LevelBadge } from "../components/visual";
 import { Counts, Score } from "./Assessments";
+import { ComparisonTable } from "./Compare";
+
+const TABS = [
+  { key: "overview", label: "Overview" },
+  { key: "provenance", label: "Provenance" },
+  { key: "compliance", label: "Compliance" },
+  { key: "relationships", label: "Relationships" },
+  { key: "compare", label: "Agentless vs Deep" },
+] as const;
 
 export function AssetDetail() {
   const { id = "" } = useParams();
   const qc = useQueryClient();
+  const [params, setParams] = useSearchParams();
+  const tab = params.get("tab") ?? "overview";
   const [requesting, setRequesting] = useState(false);
   const asset = useQuery({ queryKey: ["asset", id], queryFn: () => apiGet<Asset>(`/assets/${id}`) });
   const probeId = asset.data?.lastProbeId;
@@ -18,87 +30,130 @@ export function AssetDetail() {
     mutationFn: () => apiAction<ProbeRun>(`/assets/${id}/probes`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["asset", id] }),
   });
+  const assess = useMutation({
+    mutationFn: () => apiAction<AssessmentRun>(`/assets/${id}/assessments`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["asset", id] }),
+  });
   if (asset.error) return <ErrorBox error={asset.error} />;
   const a = asset.data;
   if (!a) return <div className="muted">Loading…</div>;
+  const fieldCount = Object.values(a.groups).reduce((n, g) => n + g.length, 0);
+  const counts: Record<string, number | null> = {
+    provenance: fieldCount, compliance: a.compliance?.openFindings ?? null, relationships: a.relationships.length,
+  };
 
   return (
     <div className="page">
       <div className="crumbs"><Link to="/assets">Assets</Link> / {a.displayName}</div>
-      <div className="asset-head">
-        <div>
-          <h1>{a.displayName} {a.isRogue && <Pill value="ROGUE" />}</h1>
-          <div className="meta">
-            <span className="mono">{a.ip}</span><span className="mono">{a.mac}</span>
-            <span>{a.type ?? "unclassified"}</span><span>L{a.level}</span>
-            {a.zone && <span>{a.zone.name}</span>}<Pill value={a.status} /><span className="muted">last seen {ago(a.lastSeen)}</span>
+      <section className="asset-hero">
+        <div className="hero-id">
+          <span className="hero-icon"><DeviceIcon type={a.type} size={26} /></span>
+          <div>
+            <h1>{a.displayName} {a.isRogue && <Pill value="ROGUE" />}</h1>
+            <div className="meta">
+              <span className="mono">{a.ip}</span><span className="mono muted">{a.mac}</span><LevelBadge level={a.level} />
+              {a.zone && <span>{a.zone.name}</span>}<Pill value={a.status} /><span className="muted">seen {ago(a.lastSeen)}</span>
+            </div>
           </div>
+        </div>
+        <div className="hero-facts">
+          <div><span>Type</span><b>{a.type ?? "Unclassified"}</b>
+            {a.classification && <small>{a.classification.confidence}% confidence</small>}</div>
+          <div><span>Criticality</span><b><Pill value={a.criticality} /></b></div>
+          <div><span>Agent eligibility</span><b><Pill value={a.eligibility} title={a.eligibilityReason} /></b></div>
+          <div><span>Agent</span><b><Pill value={a.agentState} /></b></div>
+          <div><span>Compliance</span><b><Score score={a.compliance?.score} /></b>
+            {a.compliance?.source && <small>{a.compliance.source.toLowerCase().replace("_", " ")}</small>}</div>
         </div>
         <div className="actions">
-          <button className="btn btn-primary" disabled={!a.agentless.enabled || run.isPending} title={a.agentless.reason}
-            onClick={() => run.mutate()}>RUN AGENTLESS PROBE</button>
           <div className="action-with-reason">
-            <button className="btn" disabled={!a.deployAgent.enabled} title={a.deployAgent.reason}
-              onClick={() => setRequesting(true)}>DEPLOY AGENT</button>
-            <div className={a.deployAgent.enabled ? "reason reason-ok" : "reason"}>{a.deployAgent.reason}</div>
+            <button className="btn btn-primary" disabled={!a.agentless.enabled || run.isPending} title={a.agentless.reason}
+              onClick={() => run.mutate()}>RUN AGENTLESS PROBE</button>
+            <div className="reason reason-ok">{a.agentless.reason}</div>
           </div>
+          {a.currentAgentId && a.compliance && !["REMOVED", "NOT_INSTALLED"].includes(a.agentState) ? (
+            <div className="action-with-reason">
+              <button className="btn" disabled={!a.compliance.runAction.enabled || assess.isPending} title={a.compliance.runAction.reason}
+                onClick={() => assess.mutate()}>RUN DEEP ASSESSMENT</button>
+              <div className={a.compliance.runAction.enabled ? "reason reason-ok" : "reason"}>{a.compliance.runAction.reason}</div>
+            </div>
+          ) : (
+            <div className="action-with-reason deploy-action">
+              <button className="btn" disabled={!a.deployAgent.enabled} title={a.deployAgent.reason}
+                onClick={() => setRequesting(true)}>DEPLOY AGENT</button>
+              <div className={a.deployAgent.enabled ? "reason reason-ok" : "reason"}>{a.deployAgent.reason}</div>
+            </div>
+          )}
         </div>
-      </div>
-      <ErrorBox error={run.error} />
+      </section>
+      <ErrorBox error={run.error ?? assess.error} />
       {requesting && <DeployRequest asset={a} onClose={() => setRequesting(false)} />}
       {a.currentAgentId && <AgentStrip id={a.currentAgentId} />}
-      {a.compliance && <ComplianceStrip asset={a} />}
       {a.notes.map((n) => <div key={n} className="note">{n}</div>)}
 
-      <div className="grid-3">
-        <Panel title="Classification">
-          {a.classification ? (
-            <>
-              <div className="cls-type">{a.classification.type}</div>
-              <div className="confidence"><div style={{ width: `${a.classification.confidence}%` }} />
-                <span>{a.classification.confidence}% confidence</span></div>
-              <table className="dense"><thead><tr><th>Evidence</th><th>Observed</th><th className="num">Weight</th></tr></thead>
-                <tbody>{a.classification.evidence.map((e) => (
-                  <tr key={e.signal}><td>{e.signal}<div className="muted mono small">{e.field}</div></td>
-                    <td><Value value={e.value} /></td><td className="num">{e.weight}</td></tr>))}
-                </tbody></table>
-            </>
-          ) : <p className="muted">Not classified yet. Discovery alone yields IP, MAC, reachability and (where SNMP works)
-            sysName/vendor/model. Run an agentless probe.</p>}
-        </Panel>
-        <Panel title="Agent eligibility">
-          <Pill value={a.eligibility} />
-          <p>{a.eligibilityReason}</p>
-          <table className="kv"><tbody>
-            <tr><th>Agentless</th><td>{a.agentless.reason}</td></tr>
-            <tr><th>Agent state</th><td><Pill value={a.agentState} /></td></tr>
-            <tr><th>Criticality</th><td><Pill value={a.criticality} /></td></tr>
-            <tr><th>Discovered by</th><td>{a.discoveredBy.map((m) => <SourceBadge key={m} source={m} />)}</td></tr>
-            <tr><th>First seen</th><td>{time(a.firstSeen)}</td></tr>
-            <tr><th>Last probe</th><td>{time(a.lastProbeAt)}</td></tr>
-          </tbody></table>
-        </Panel>
-        <Panel title={<>Agentless probe {probe.data && <Pill value={probe.data.status} />}</>}
-          actions={probe.data && <Link to={`/probes?id=${probe.data.id}`}>details →</Link>}>
-          {probe.data ? <StepList steps={probe.data.steps} /> : <p className="muted">No probe has run on this asset.</p>}
-        </Panel>
-      </div>
+      <nav className="tabs" role="tablist" aria-label="Asset sections">
+        {TABS.map((t) => (
+          <button key={t.key} role="tab" aria-selected={tab === t.key} className={`tab${tab === t.key ? " tab-active" : ""}`}
+            onClick={() => setParams(t.key === "overview" ? {} : { tab: t.key }, { replace: true })}>
+            {t.label}{counts[t.key] != null && counts[t.key]! > 0 && <span className="tab-count">{counts[t.key]}</span>}
+          </button>))}
+      </nav>
 
-      <div className="groups">
-        {Object.entries(a.groups).map(([group, fields]) => (
-          <Panel key={group} title={group}>
-            <table className="dense fields"><tbody>
-              {fields.map((f) => (
-                <tr key={f.path}><th className="mono">{f.path}</th><td><Value value={f.value} /></td>
-                  <td className="src-cell"><SourceBadge source={f.source} label={f.sourceLabel} stage={f.stage} /></td>
-                  <td className="muted small" title={f.collectedAt}>{f.stage.toLowerCase()} · {ago(f.collectedAt)}</td></tr>
-              ))}
+      {tab === "overview" && (
+        <div className="grid-3">
+          <Panel title="Classification">
+            {a.classification ? (
+              <>
+                <div className="cls-type">{a.classification.type}</div>
+                <div className="confidence"><div style={{ width: `${a.classification.confidence}%` }} />
+                  <span>{a.classification.confidence}% confidence</span></div>
+                <table className="dense"><thead><tr><th>Evidence</th><th>Observed</th><th className="num">Weight</th></tr></thead>
+                  <tbody>{a.classification.evidence.map((e) => (
+                    <tr key={e.signal}><td>{e.signal}<div className="muted mono small">{e.field}</div></td>
+                      <td><Value value={e.value} /></td><td className="num">{e.weight}</td></tr>))}
+                  </tbody></table>
+              </>
+            ) : <p className="muted">Not classified yet. Discovery alone yields IP, MAC, reachability and (where SNMP works)
+              sysName/vendor/model. Run an agentless probe.</p>}
+          </Panel>
+          <Panel title="Agent eligibility">
+            <Pill value={a.eligibility} />
+            <p>{a.eligibilityReason}</p>
+            <table className="kv"><tbody>
+              <tr><th>Agentless</th><td>{a.agentless.reason}</td></tr>
+              <tr><th>Agent state</th><td><Pill value={a.agentState} /></td></tr>
+              <tr><th>Criticality</th><td><Pill value={a.criticality} /></td></tr>
+              <tr><th>Discovered by</th><td>{a.discoveredBy.map((m) => <SourceBadge key={m} source={m} />)}</td></tr>
+              <tr><th>First seen</th><td>{time(a.firstSeen)}</td></tr>
+              <tr><th>Last probe</th><td>{time(a.lastProbeAt)}</td></tr>
             </tbody></table>
           </Panel>
-        ))}
-      </div>
+          <Panel title={<>Agentless probe {probe.data && <Pill value={probe.data.status} />}</>}
+            actions={probe.data && <Link to={`/probes?id=${probe.data.id}`}>details →</Link>}>
+            {probe.data ? <StepList steps={probe.data.steps} /> : <p className="muted">No probe has run on this asset.</p>}
+          </Panel>
+        </div>
+      )}
 
-      {a.relationships.length > 0 && (
+      {tab === "provenance" && (fieldCount ? (
+        <div className="groups">
+          {Object.entries(a.groups).map(([group, fields]) => (
+            <Panel key={group} title={group}>
+              <table className="dense fields"><tbody>
+                {fields.map((f) => (
+                  <tr key={f.path}><th className="mono">{f.path}</th><td><Value value={f.value} /></td>
+                    <td className="src-cell"><SourceBadge source={f.source} label={f.sourceLabel} stage={f.stage} /></td>
+                    <td className="muted small" title={f.collectedAt}>{f.stage.toLowerCase()} · {ago(f.collectedAt)}</td></tr>
+                ))}
+              </tbody></table>
+            </Panel>
+          ))}
+        </div>) : <div className="empty-inline">No fields collected yet.</div>)}
+
+      {tab === "compliance" && (a.compliance ? <ComplianceStrip asset={a} />
+        : <div className="empty-inline">No compliance data yet.</div>)}
+
+      {tab === "relationships" && (a.relationships.length ? (
         <Panel title="Observed relationships">
           <table className="dense"><thead><tr><th>Kind</th><th>Direction</th><th>Peer</th><th>Protocol</th><th>Port</th><th>Source</th></tr></thead>
             <tbody>{a.relationships.map((r, i) => (
@@ -106,7 +161,9 @@ export function AssetDetail() {
                 <td>{r.protocol}</td><td className="mono">{r.port ?? "—"}</td><td><SourceBadge source={r.source} /></td></tr>))}
             </tbody></table>
         </Panel>
-      )}
+      ) : <div className="empty-inline">No relationships observed yet. They come from WMI netstat, switch LLDP/FDB and MQTT.</div>)}
+
+      {tab === "compare" && <ComparisonTable id={a.id} />}
     </div>
   );
 }
@@ -186,7 +243,7 @@ function ComplianceStrip({ asset }: { asset: Asset }) {
   });
   return (
     <Panel title="Compliance · Windows Engineering Baseline" actions={<>
-      <Link to={`/assets/${asset.id}/compare`}>Agentless vs Deep Agent →</Link>{" "}
+
       {c.lastRunId && <Link to={`/assessments/${c.lastRunId}`}>last run →</Link>}</>}>
       <div className="compliance">
         <div><span className="muted small">Score</span><div className="big"><Score score={c.score} /></div>

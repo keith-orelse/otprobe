@@ -10,7 +10,6 @@ export function Approvals() {
   const q = useQuery({ queryKey: ["approvals", status], queryFn: () => apiGet<Page<Approval>>("/approvals", { status, limit: 100 }) });
   return (
     <div className="page">
-      <h1>Approvals</h1>
       <div className="toolbar">
         <select value={status} onChange={(e) => setStatus(e.target.value)}>
           <option value="PENDING">Pending</option><option value="">All</option><option>APPROVED</option>

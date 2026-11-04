@@ -13,7 +13,6 @@ export function AuditLogs() {
   const verify = useQuery({ queryKey: ["audit", "verify"], queryFn: () => apiGet<{ valid: boolean; events: number }>("/audit-events/verify") });
   return (
     <div className="page">
-      <h1>Audit Logs</h1>
       <div className="toolbar">
         <input placeholder="Action (e.g. ROGUE_DEVICE_DETECTED)" value={action} onChange={(e) => { setAction(e.target.value.toUpperCase()); setCursor(null); }} />
         <input placeholder="Correlation ID" value={correlationId} onChange={(e) => { setCorrelationId(e.target.value); setCursor(null); }} />

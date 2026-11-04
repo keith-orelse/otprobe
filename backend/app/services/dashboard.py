@@ -2,13 +2,13 @@ from __future__ import annotations
 
 from collections import Counter
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app import schemas
 from app.adapters.registry import AdapterRegistry
 from app.core.clock import utcnow
-from app.models import Agent, Asset, AuditEvent, DiscoveryJob, DriftEvent, EvidenceChange, Finding
+from app.models import Agent, Approval, Asset, AuditEvent, DiscoveryJob, DriftEvent, EvidenceChange, Finding
 from app.services.assessments import compliance, drift_schema
 from app.services.discovery import to_schema as job_schema
 
@@ -37,7 +37,15 @@ def summary(ctx, session: Session, registry: AdapterRegistry) -> schemas.Dashboa
                 open_findings=c.open_findings))
     drift = session.scalars(select(DriftEvent).order_by(DriftEvent.detected_at.desc()).limit(8))
     changes = session.scalars(select(EvidenceChange).order_by(EvidenceChange.detected_at.desc()).limit(10))
+    by_level_type: dict[str, dict[str, int]] = {}
+    for a in assets:
+        bucket = by_level_type.setdefault(a.level, {})
+        key = a.device_type or "Unclassified"
+        bucket[key] = bucket.get(key, 0) + 1
+    agents = Counter(a.status for a in session.scalars(select(Agent)) if a.status != "REMOVED")
+    pending = session.scalar(select(func.count()).select_from(Approval).where(Approval.status == "PENDING")) or 0
     return schemas.DashboardSummary(
+        assets_by_level_type=by_level_type, pending_approvals=pending, agents=dict(agents),
         assets={"total": len(assets), **Counter(a.status for a in assets)},
         assets_by_level=dict(Counter(a.level for a in assets)),
         eligibility=dict(Counter(a.eligibility for a in assets)),
@@ -53,4 +61,17 @@ def summary(ctx, session: Session, registry: AdapterRegistry) -> schemas.Dashboa
         recent_changes=[{"assetId": c.asset_id, "assetName": names.get(c.asset_id), "path": c.path,
                          "before": c.before, "after": c.after, "detectedAt": c.detected_at.isoformat(),
                          "runId": c.run_id} for c in changes],
+    )
+
+
+def nav_counts(ctx, session: Session) -> schemas.NavCounts:
+    count = lambda stmt: session.scalar(select(func.count()).select_from(stmt.subquery())) or 0  # noqa: E731
+    open_f = select(Finding.id).where(Finding.status.in_(["OPEN", "REOPENED"]))
+    return schemas.NavCounts(
+        pending_approvals=count(select(Approval.id).where(Approval.status == "PENDING")),
+        open_findings=count(open_f),
+        critical_findings=count(open_f.where(Finding.severity.in_(["CRITICAL", "HIGH"]))),
+        agents_attention=count(select(Agent.id).where(Agent.status.in_(["STALE", "OFFLINE", "ERROR"]))),
+        rogue_assets=count(select(Asset.id).where(Asset.is_rogue.is_(True))),
+        running_workflows=len(ctx.runner.active()),
     )

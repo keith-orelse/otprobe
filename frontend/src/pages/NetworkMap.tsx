@@ -7,8 +7,8 @@ import { ErrorBox, Panel, Pill } from "../components/ui";
 import type { Topology, TopologyNode } from "../types";
 
 const STATE_COLOR: Record<string, string> = {
-  ONLINE: "#3fb950", OFFLINE: "#f85149", AGENTLESS: "#58a6ff", AGENT_INSTALLED: "#bc8cff", WARNING: "#d29922",
-  FAILED: "#f85149", UNKNOWN: "#6e7781",
+  ONLINE: "#1e8e3e", OFFLINE: "#d93025", AGENTLESS: "#1a73e8", AGENT_INSTALLED: "#7c3aed", WARNING: "#e9a100",
+  FAILED: "#d93025", UNKNOWN: "#94a3b8",
 };
 const LEGEND = ["ONLINE", "AGENTLESS", "AGENT_INSTALLED", "WARNING", "OFFLINE", "FAILED", "UNKNOWN"];
 
@@ -69,19 +69,19 @@ export function NetworkMap() {
     const c = cytoscape({
       container: ref.current, elements, layout: { name: "preset" }, wheelSensitivity: 0.2, autoungrabify: false,
       style: [
-        { selector: "node", style: { "background-color": "#11161d", "border-width": 3, "border-color": "data(color)",
-          label: "data(label)", color: "#c9d4e0", "font-size": 10, "text-wrap": "wrap", "text-valign": "bottom",
-          "text-margin-y": 6, width: 34, height: 34, "font-family": "IBM Plex Mono, monospace" } },
-        { selector: "node[kind='server']", style: { shape: "round-rectangle", "border-color": "#f2a900" } },
-        { selector: "node[kind='conduit']", style: { shape: "diamond", "border-color": "#f2a900", width: 40, height: 40 } },
-        { selector: ":parent", style: { "background-color": "#0f141a", "background-opacity": 1, "border-width": 1,
-          "border-color": "#2b3542", shape: "round-rectangle", label: "data(label)", "text-valign": "top",
-          "text-halign": "left", "text-margin-x": 120, color: "#7d8a99", "font-size": 11, padding: "28px" } },
-        { selector: "edge", style: { width: 1.5, "line-color": "#3b4756", "curve-style": "bezier" } },
-        { selector: "edge[kind='FLOW']", style: { "line-style": "dashed", "line-color": "#2f81f7", "target-arrow-shape": "triangle",
-          "target-arrow-color": "#2f81f7", label: "data(label)", "font-size": 8, color: "#58a6ff",
-          "text-background-color": "#0e1217", "text-background-opacity": 1 } },
-        { selector: ":selected", style: { "border-color": "#ffffff", "border-width": 4 } },
+        { selector: "node", style: { "background-color": "#ffffff", "border-width": 3, "border-color": "data(color)",
+          label: "data(label)", color: "#0f172a", "font-size": 10, "text-wrap": "wrap", "text-valign": "bottom",
+          "text-margin-y": 6, width: 34, height: 34, "font-family": "Inter, system-ui, sans-serif", "font-weight": 600 } },
+        { selector: "node[kind='server']", style: { shape: "round-rectangle", "border-color": "#d02e27", "background-color": "#fce8e6" } },
+        { selector: "node[kind='conduit']", style: { shape: "diamond", "border-color": "#d02e27", width: 40, height: 40 } },
+        { selector: ":parent", style: { "background-color": "#f8fafc", "background-opacity": 0.9, "border-width": 1,
+          "border-color": "#e2e8f0", shape: "round-rectangle", label: "data(label)", "text-valign": "top",
+          "text-halign": "left", "text-margin-x": 120, color: "#94a3b8", "font-size": 11, "font-weight": 700, padding: "28px" } },
+        { selector: "edge", style: { width: 1.5, "line-color": "#cbd5e1", "curve-style": "bezier" } },
+        { selector: "edge[kind='FLOW']", style: { "line-style": "dashed", "line-color": "#d02e27", "target-arrow-shape": "triangle",
+          "target-arrow-color": "#d02e27", label: "data(label)", "font-size": 8, color: "#b32520",
+          "text-background-color": "#ffffff", "text-background-opacity": 1 } },
+        { selector: ":selected", style: { "border-color": "#0f172a", "border-width": 4 } },
       ],
     });
     c.on("tap", "node", (evt) => {
@@ -95,7 +95,6 @@ export function NetworkMap() {
 
   return (
     <div className="page">
-      <h1>Network Map</h1>
       <ErrorBox error={topo.error} />
       <div className="toolbar">
         <label className="check"><input type="checkbox" checked={flows} onChange={(e) => setFlows(e.target.checked)} /> Show communication flows</label>

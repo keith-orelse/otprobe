@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { apiAction, apiGet } from "../api";
 import { ErrorBox, Panel, Pill, Progress, StepList, time } from "../components/ui";
+import { Lifecycle } from "../components/visual";
 import type { ActionState, Deployment, Page } from "../types";
 
 export function Deployments() {
@@ -9,7 +10,6 @@ export function Deployments() {
   const q = useQuery({ queryKey: ["deployments", "list"], queryFn: () => apiGet<Page<Deployment>>("/deployments", { limit: 50 }) });
   return (
     <div className="page">
-      <h1>Deployments</h1>
       <p className="hint">Request a deployment from an eligible asset's page. Flow: request → approval (by someone else) →
         precheck → deploy → the agent enrolls itself (outbound) → first heartbeat.</p>
       <ErrorBox error={q.error} />
@@ -39,6 +39,26 @@ function ActionButton({ label, state, onClick, primary }: { label: string; state
       <div className={state.enabled ? "reason reason-ok" : "reason"}>{state.reason}</div>
     </div>
   );
+}
+
+const DEPLOY_STAGES = [
+  { key: "requested", label: "Requested" }, { key: "approval", label: "Approval" }, { key: "precheck", label: "Precheck" },
+  { key: "deploy", label: "Deploy" }, { key: "enroll", label: "Enrollment" }, { key: "done", label: "Completed" },
+];
+
+/** Maps the deployment state machine onto lifecycle stages (current stage, and where it stopped if it failed). */
+function deployStage(d: Deployment): { current: number; failedAt?: number; failedLabel?: string } {
+  switch (d.status) {
+    case "REQUESTED": case "PENDING_APPROVAL": return { current: 1 };
+    case "REJECTED": return { current: 1, failedAt: 1, failedLabel: "Rejected" };
+    case "APPROVED": case "PRECHECK_RUNNING": return { current: 2 };
+    case "PRECHECK_FAILED": return { current: 2, failedAt: 2, failedLabel: "Precheck failed" };
+    case "PRECHECK_PASSED": case "DEPLOYING": return { current: 3 };
+    case "ENROLLING": return { current: 4 };
+    case "COMPLETED": return { current: 5 };
+    default: return d.enrollingSince ? { current: 4, failedAt: 4, failedLabel: "Enrollment failed" }
+      : { current: 3, failedAt: 3, failedLabel: "Deploy failed" };
+  }
 }
 
 export function DeploymentDetail() {
@@ -73,9 +93,10 @@ export function DeploymentDetail() {
           {d.status === "FAILED" && <ActionButton label="RETRY" state={d.actions.retry} onClick={() => act.mutate("retry")} />}
         </div>
       </div>
+      <Lifecycle stages={DEPLOY_STAGES} {...deployStage(d)} />
       <ErrorBox error={act.error} />
       {d.failureCode && <div className="error-box"><b>{d.failureCode}</b>: {d.failureDetail}</div>}
-      <div className="grid-3">
+      <div className="grid-2">
         <Panel title="Approval">
           {d.approval && (
             <table className="kv"><tbody>

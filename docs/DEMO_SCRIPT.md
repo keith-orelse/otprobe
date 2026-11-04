@@ -41,10 +41,10 @@ eng-ws-01 → DEPLOY AGENT → SUBMIT FOR APPROVAL.
 
 ### 6. Assessment: "Is it hardened?"
 eng-ws-01 → **RUN DEEP ASSESSMENT** → **75%**: 7 pass, 2 fail, 1 warning, 1 unknown.
-- **last run →**: missing patches FAIL, too many admins FAIL, `RemoteTool Demo` WARNING, USB policy **UNKNOWN**
+- **Compliance** tab → **last run →**: missing patches FAIL, too many admins FAIL, `RemoteTool Demo` WARNING, USB policy **UNKNOWN**
   (UNKNOWN is excluded from the score, never guessed).
 - Rules come from `rules/windows_engineering_baseline.yaml`, which is data, not code.
-- **Agentless vs Deep Agent**: only the agent sees `RemoteTool Demo` (a per-user install), local admins, and the
+- **Agentless vs Deep** tab: only the agent sees `RemoteTool Demo` (a per-user install), local admins, and the
   password and USB policies.
 
 ### 7. Drift: "Someone turned the firewall off"
