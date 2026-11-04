@@ -2,6 +2,8 @@
 
 > Status: complete (Phases 1–5). The decisions made during the build are in [DECISIONS.md](DECISIONS.md).
 >
+> **Live network redesign in progress:** see [LIVE_ARCHITECTURE.md](LIVE_ARCHITECTURE.md). This document describes the simulated POC, which is kept on the `simulated` branch.
+>
 > OTProbe is a standalone proof-of-concept for **OT asset discovery, agentless probing and deep agent probing**.
 > The OT network, its devices and every protocol response are **simulated**. The web console, REST API,
 > database, workflows, approvals, compliance rules, findings and audit trail are **real**.
