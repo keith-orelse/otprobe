@@ -180,3 +180,46 @@ async def test_enrollment_token_is_single_use(discovered):
                             json={"seq": 1, "agentTime": "2026-11-02T10:00:00Z"},
                             headers={"Authorization": "Bearer agt_wrong"})
     assert r.status_code == 401
+
+
+async def test_agent_heartbeat_before_enrolling_still_completes(discovered):
+    """Regression: the agent can enroll and heartbeat while the engine is still finishing its last deploy step
+    (deployment DEPLOYING). The deployment must still complete instead of timing out as ENROLLMENT_FAILED."""
+    from app.engines.deployment import engine as deploy_engine
+
+    h = discovered
+    await h.probe(EWS)
+    dep = await request_deployment(h, EWS)
+    await approve(h, dep)
+    await precheck(h, dep["id"])
+    original = deploy_engine.DeploymentEngine._install
+
+    async def install_then_agent_races(self, dep_id, tracker, winrm, session, ref, asset_id):
+        real_execute = winrm.execute
+
+        async def execute(sess, op, params):
+            res = await real_execute(sess, op, params)
+            if op.value == "START_SERVICE":   # the agent wakes up right here, before the engine moves to ENROLLING
+                bundle = h.ctx.extras["world"].device("dev-ews01").state["files"]["enroll_bundle"]
+                body = {"enrollmentToken": bundle["enrollmentToken"], "hostname": "eng-ws-01", "hostFingerprint": "x",
+                        "agentVersion": "1.1.0"}
+                enrolled = (await h.client.post("/api/v1/agents/enroll", json=body)).json()
+                r = await h.client.post(f"/api/v1/agents/{enrolled['agentId']}/heartbeat",
+                                        json={"seq": 1, "agentTime": "2026-11-04T10:00:00Z"},
+                                        headers={"Authorization": f"Bearer {enrolled['agentCredential']}"})
+                assert r.status_code == 204
+            return res
+
+        winrm.execute = execute
+        try:
+            return await original(self, dep_id, tracker, winrm, session, ref, asset_id)
+        finally:
+            winrm.execute = real_execute
+
+    deploy_engine.DeploymentEngine._install = install_then_agent_races
+    try:
+        done = await deploy(h, dep["id"])
+    finally:
+        deploy_engine.DeploymentEngine._install = original
+    assert done["status"] == "COMPLETED", (done["failureCode"], done["failureDetail"])
+    assert next(s for s in done["steps"] if s["name"] == "AWAIT_ENROLLMENT")["status"] == "OK"

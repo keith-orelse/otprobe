@@ -18,6 +18,7 @@ from app.core.crypto import sha256_hex
 from app.core.errors import ProblemError, not_found
 from app.core.principal import CurrentAgent
 from app.core.security import opaque_token
+from app.engines.deployment.engine import complete_enrollment
 from app.models import Agent, Asset, Deployment, EnrollmentToken, Heartbeat, WorkflowStep
 from app.services.common import paginate
 from app.workflow.machine import AGENT, DEPLOYMENT
@@ -79,21 +80,13 @@ def heartbeat(ctx: AppContext, agent_ref: CurrentAgent, hb: schemas.HeartbeatIn)
         asset = s.get(Asset, agent.asset_id)
         if agent.status == "ENROLLING":
             AGENT.transition(s, agent, "ONLINE", agent_ref.actor, "First heartbeat after enrollment")
-            dep = s.get(Deployment, agent.deployment_id)
-            if dep.status == "ENROLLING":
-                dep.finished_at = now
-                DEPLOYMENT.transition(s, dep, "COMPLETED", agent_ref.actor, details={"agentId": agent.id})
-                step = s.scalar(select(WorkflowStep).where(WorkflowStep.workflow_id == dep.id,
-                                                           WorkflowStep.name == "AWAIT_ENROLLMENT"))
-                if step is not None:
-                    step.status, step.finished_at = "OK", now
-                    step.detail = f"Agent {agent.id[:8]} enrolled (credential {agent.credential_prefix}…) and is ONLINE"
-                    events.stage(s, "deployment.step", "deployment", dep.id,
-                                 {"name": step.name, "seq": step.seq, "status": step.status, "detail": step.detail})
         elif agent.status in ("STALE", "OFFLINE"):
             AGENT.transition(s, agent, "ONLINE", agent_ref.actor, "Heartbeat received",
                              {"lastSeq": hb.seq})
         asset.agent_state = agent.status
+        # Not only the first heartbeat: the agent can enroll and heartbeat before the deployment engine has moved the
+        # deployment to ENROLLING (it starts as soon as its service starts), so any heartbeat completes it.
+        complete_enrollment(s, s.get(Deployment, agent.deployment_id), agent, agent_ref.actor)
         events.stage(s, "agent.heartbeat", "agent", agent.id, {"seq": hb.seq, "status": agent.status,
                                                                "at": now.isoformat()})
 

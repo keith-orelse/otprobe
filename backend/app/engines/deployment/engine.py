@@ -9,17 +9,18 @@ from datetime import timedelta
 from typing import Any
 
 from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from app.adapters.base import PackageRef, Protocol, RemoteOperation, RemoteSession, Stage, Target
 from app.context import AppContext
 from app.core import audit, events
-from app.core.audit import system
+from app.core.audit import Actor, system
 from app.core.clock import utcnow
 from app.core.correlation import get_correlation_id
 from app.core.security import opaque_token
 from app.engines.inventory import effective_fields
 from app.engines.protocol_events import winrm_event
-from app.models import Agent, Asset, Deployment, EnrollmentToken, Package, PrecheckResult
+from app.models import Agent, Asset, Deployment, EnrollmentToken, Package, PrecheckResult, WorkflowStep
 from app.workflow.machine import AGENT, DEPLOYMENT
 from app.workflow.steps import StepTracker
 
@@ -42,6 +43,24 @@ def package_compatible(package: Package, os_product: str | None) -> tuple[bool, 
     if match is None:
         return False, f"{os_product} not in supported OS list ({', '.join(package.supported_os)})"
     return True, f"{package.name} {package.version} ({package.architecture}) supports {os_product}"
+
+
+def complete_enrollment(s: Session, dep: Deployment, agent: Agent, actor: Actor) -> bool:
+    """ENROLLING -> COMPLETED once the deployment's agent is enrolled and has heartbeated (whichever comes last)."""
+    if dep.status != "ENROLLING" or agent.status != "ONLINE" or agent.last_heartbeat_at is None:
+        return False
+    now = utcnow()
+    dep.finished_at = now
+    DEPLOYMENT.transition(s, dep, "COMPLETED", actor, details={"agentId": agent.id})
+    step = s.scalar(select(WorkflowStep).where(WorkflowStep.workflow_id == dep.id,
+                                               WorkflowStep.name == "AWAIT_ENROLLMENT"))
+    if step is not None:
+        step.status, step.finished_at = "OK", now
+        step.detail = f"Agent {agent.id[:8]} enrolled (credential {agent.credential_prefix}…) and is ONLINE"
+        events.stage(s, "deployment.step", "deployment", dep.id,
+                     {"name": step.name, "seq": step.seq, "status": step.status, "detail": step.detail})
+    return True
+
 
 
 class DeploymentEngine:
@@ -301,3 +320,7 @@ class DeploymentEngine:
             dep = s.get(Deployment, dep_id)
             dep.enrolling_since = utcnow()
             DEPLOYMENT.transition(s, dep, "ENROLLING", ACTOR, details={"agentId": dep.agent_id})
+            # The agent may already have enrolled and heartbeated while the steps above were finishing.
+            agent = s.get(Agent, dep.agent_id)
+            if agent is not None and agent.status == "ONLINE" and agent.last_heartbeat_at is not None:
+                complete_enrollment(s, dep, agent, ACTOR)
