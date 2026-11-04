@@ -15,11 +15,13 @@ from app.core.correlation import get_correlation_id
 from app.core.errors import ProblemError, not_found
 from app.engines.discovery.engine import DiscoveryEngine
 from app.models import DiscoveryJob, DiscoveryObservation, WorkflowStep, Zone
+from app.services import safety
 from app.services.common import paginate
 from app.workflow.machine import DISCOVERY
 
 
-def _validate_targets(session: Session, targets: list[str]) -> tuple[list[str], bool]:
+def _validate_targets(ctx: AppContext, session: Session, targets: list[str]) -> tuple[list[str], bool]:
+    safety.ensure_can_scan(ctx, session, targets)   # live mode: scope, exclusions, kill switch
     zones = list(session.scalars(select(Zone)))
     normalized, safe = [], False
     for t in targets:
@@ -30,6 +32,9 @@ def _validate_targets(session: Session, targets: list[str]) -> tuple[list[str], 
                                f"'{t}' is not a valid CIDR") from None
         zone = next((z for z in zones if net.subnet_of(ipaddress.ip_network(z.cidr))), None)
         if zone is None:
+            if ctx.settings.live:
+                raise ProblemError(422, "target-out-of-scope", "Target outside the scan scope",
+                                   f"{t} is not inside an approved scan scope entry")
             raise ProblemError(422, "target-not-in-simulated-network", "Target outside the simulated network",
                                f"{t} is not inside a configured zone. OTProbe never scans real networks.")
         if not zone.scannable:
@@ -44,13 +49,20 @@ def _validate_targets(session: Session, targets: list[str]) -> tuple[list[str], 
 METHOD_INFO = {
     Protocol.ARP: "Passive ARP/neighbor tables. Finds every powered device, including ICMP-silent field devices.",
     Protocol.ICMP: "Echo sweep, rate-limited in safe mode. No reply does not mean a device is offline.",
+    Protocol.TCP: "TCP connect to known service ports on hosts already seen. Handshake and close only, no payload.",
     Protocol.SNMP: "SNMPv3 GET of sysName/sysDescr/entity with the read-only profile OT-SNMPV3-RO.",
 }
+
+
+def default_methods(registry: AdapterRegistry) -> list[str]:
+    return [p.value for p in METHOD_INFO if registry.has(p)]
 
 
 def methods(registry: AdapterRegistry) -> list[schemas.DiscoveryMethod]:
     out = []
     for p, description in METHOD_INFO.items():
+        if not registry.has(p):
+            continue
         d = registry.get(p).descriptor()
         out.append(schemas.DiscoveryMethod(method=p.value, label=d.display_label, implementation=d.implementation,
                                            simulated=d.simulated, description=description))
@@ -75,14 +87,21 @@ def to_schema(session: Session, job: DiscoveryJob, with_steps: bool = True) -> s
 
 def create_job(ctx: AppContext, session: Session, req: schemas.DiscoveryJobCreate, actor: Actor
                ) -> tuple[dict[str, Any], Callable[[], None]]:
-    targets, safe = _validate_targets(session, req.targets)
+    targets, safe = _validate_targets(ctx, session, req.targets)
+    supported = default_methods(ctx.registry)
+    chosen = list(dict.fromkeys(req.methods or supported))
+    unsupported = [m for m in chosen if m not in supported]
+    if unsupported:
+        raise ProblemError(422, "method-not-supported", "Discovery method not available",
+                           f"{', '.join(unsupported)} is not available in this mode")
     active = session.scalar(select(DiscoveryJob).where(DiscoveryJob.status.in_(["QUEUED", "RUNNING"])))
     if active is not None:
         raise ProblemError(409, "discovery-already-running", "A discovery job is already running",
                            f"Job {active.id} is {active.status}")
-    job = DiscoveryJob(targets=targets, methods=list(dict.fromkeys(req.methods)), safe_mode=safe,
+    job = DiscoveryJob(targets=targets, methods=chosen, safe_mode=safe, snmp_profile=req.snmp_profile,
                        requested_by=actor.name, correlation_id=get_correlation_id())
-    DISCOVERY.create(session, job, actor, {"targets": targets, "methods": job.methods, "safeMode": safe})
+    DISCOVERY.create(session, job, actor, {"targets": targets, "methods": job.methods, "safeMode": safe,
+                                           "snmpProfile": req.snmp_profile})
     body = to_schema(session, job, with_steps=False).dump()
     job_id = job.id
     return body, lambda: ctx.runner.submit(f"discovery:{job_id}", DiscoveryEngine(ctx).run(job_id))

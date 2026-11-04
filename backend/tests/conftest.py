@@ -94,7 +94,8 @@ class Harness:
 
 
 def make_settings(db_path: Path, **overrides) -> Settings:
-    return Settings.from_env(**{"database_url": f"sqlite:///{db_path}", "speed_factor": TEST_SPEED, **overrides})
+    return Settings.from_env(**{"database_url": f"sqlite:///{db_path}", "speed_factor": TEST_SPEED,
+                                "adapter_mode": "simulated", **overrides})
 
 
 @pytest.fixture

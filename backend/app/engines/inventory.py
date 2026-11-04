@@ -132,10 +132,23 @@ def record_relationships(session: Session, asset: Asset, flat: dict[str, Any], e
     session.flush()
 
 
-def merge_observation(session: Session, ip: str, mac: str, actor: Actor, baseline_zone_ids: set[str]
+def merge_observation(session: Session, ip: str, mac: str | None, actor: Actor, baseline_zone_ids: set[str]
                       ) -> tuple[Asset, bool, bool]:
-    """Find-or-create by MAC. Returns (asset, created, rogue)."""
-    asset = session.scalar(select(Asset).where(Asset.mac == mac))
+    """Find-or-create by MAC, falling back to IP. Returns (asset, created, rogue).
+
+    Live discovery sees hosts by IP first (ICMP/TCP) and learns the MAC from the neighbour table afterwards; hosts
+    on remote subnets never have a MAC. So: a known MAC wins; otherwise an asset at the same IP with no MAC yet
+    adopts the MAC; an IP-only observation matches by IP."""
+    asset = session.scalar(select(Asset).where(Asset.mac == mac)) if mac else None
+    if asset is None:
+        by_ip = session.scalar(select(Asset).where(Asset.ip == ip, Asset.mac.is_(None)) if mac
+                               else select(Asset).where(Asset.ip == ip))
+        if by_ip is not None:
+            if mac:
+                by_ip.mac = mac
+                audit.record(session, actor, "ASSET_MAC_LEARNED", "asset", by_ip.id, {"ip": ip, "mac": mac})
+            by_ip.status, by_ip.last_seen = "ONLINE", utcnow()
+            return by_ip, False, False
     now = utcnow()
     if asset is None:
         zone = zone_for_ip(session, ip)
@@ -147,8 +160,9 @@ def merge_observation(session: Session, ip: str, mac: str, actor: Actor, baselin
         session.flush()
         audit.record(session, actor, "ASSET_CREATED", "asset", asset.id, {"ip": ip, "mac": mac})
         if rogue:
+            who = f"unknown MAC {mac}" if mac else "unknown device"
             audit.record(session, actor, "ROGUE_DEVICE_DETECTED", "asset", asset.id,
-                         {"ip": ip, "mac": mac, "message": f"Rogue device: unknown MAC {mac} at {ip}"})
+                         {"ip": ip, "mac": mac, "message": f"Rogue device: {who} at {ip}"})
             events.stage(session, "asset.rogue", "asset", asset.id, {"ip": ip, "mac": mac})
         return asset, True, rogue
     if asset.ip != ip:

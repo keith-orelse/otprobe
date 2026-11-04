@@ -11,7 +11,6 @@ from app.adapters.simulated.mqtt import SimulatedMqttAdapter
 from app.adapters.simulated.snmp import SimulatedSnmpAdapter
 from app.adapters.simulated.ssh import SimulatedSshAdapter
 from app.adapters.simulated.transfer import SimulatedPackageTransfer
-from app.adapters.simulated.vault import SimulatedCredentialVault
 from app.adapters.simulated.winrm import SimulatedWinRmAdapter
 from app.adapters.simulated.wmi import SimulatedWmiAdapter
 from app.sim.broker import Broker
@@ -35,4 +34,4 @@ def build_transfer(registry: AdapterRegistry, world: SimWorld, latency: SimLaten
     return SimulatedPackageTransfer(world, latency, winrm.session_device)
 
 
-__all__ = ["register_simulated", "build_transfer", "SimulatedCredentialVault", "SimulatedControl"]
+__all__ = ["register_simulated", "build_transfer", "SimulatedControl"]

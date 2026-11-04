@@ -45,7 +45,7 @@ class WorkflowStep(Camel):
     finished_at: datetime | None = None
 
 
-Method = Literal["ARP", "ICMP", "SNMP"]
+Method = Literal["ARP", "ICMP", "TCP", "SNMP"]
 
 
 class DiscoveryMethod(Camel):
@@ -58,7 +58,8 @@ class DiscoveryMethod(Camel):
 
 class DiscoveryJobCreate(Camel):
     targets: list[str] = Field(min_length=1, max_length=8, examples=[["192.168.20.0/24", "192.168.10.0/24"]])
-    methods: list[Method] = Field(default_factory=lambda: ["ARP", "ICMP", "SNMP"], min_length=1)
+    methods: list[Method] | None = Field(None, min_length=1, description="Default: every method the mode supports")
+    snmp_profile: str | None = Field(None, max_length=64, description="Vault profile for SNMP (default OT-SNMPV3-RO)")
 
 
 class DiscoveryJob(Camel):
@@ -215,6 +216,84 @@ class VaultProfile(Camel):
     username: str
     secret: str
     secret_set: bool
+
+
+class VaultProfileWrite(Camel):
+    """Create or update a credential profile. ``secret`` is write-only: it is never returned. Omit it on update to
+    keep the stored secret."""
+
+    protocol: Literal["SNMP", "WinRM", "SSH", "MQTT"]
+    username: str = Field(min_length=1, max_length=128)
+    secret: str | None = Field(None, min_length=1, max_length=512)
+    params: dict[str, Any] = Field(default_factory=dict, examples=[{"version": "3", "auth": "SHA-256",
+                                                                    "priv": "AES-128"}])
+    description: str = Field("", max_length=500)
+
+
+Profile = Literal["IT", "OT_SENSITIVE"]
+
+
+class ScanScope(Camel):
+    id: str
+    cidr: str
+    kind: str
+    profile: str
+    level: str
+    label: str
+    authorization: str
+    plugins: list[str]
+    created_by: str
+    created_at: datetime
+    disabled_at: datetime | None = None
+
+
+class ScanScopeCreate(Camel):
+    cidr: str = Field(examples=["10.20.1.0/24"])
+    kind: Literal["INCLUDE", "EXCLUDE"] = "INCLUDE"
+    profile: Profile = "OT_SENSITIVE"
+    level: str = Field("?", max_length=8, description="Default Purdue level for assets found here", examples=["2"])
+    label: str = Field("", max_length=128, examples=["Line 1 controllers"])
+    authorization: str = Field("", max_length=2000, description="Who approved scanning this range, and when")
+    plugins: list[str] = Field(default_factory=list, description="OT protocol plugins enabled here (phase L3)")
+
+
+class ScanScopeUpdate(Camel):
+    profile: Profile | None = None
+    level: str | None = Field(None, max_length=8)
+    label: str | None = Field(None, max_length=128)
+    authorization: str | None = Field(None, max_length=2000)
+    plugins: list[str] | None = None
+
+
+class SafetyReason(Camel):
+    reason: str = Field(min_length=3, max_length=500, examples=["Unexpected alarm on Line 1 HMI"])
+
+
+class SafeModeChange(SafetyReason):
+    enabled: bool
+
+
+class SafetyView(Camel):
+    live: bool
+    armed: bool
+    safe_mode: bool
+    changed_by: str | None = None
+    changed_at: datetime | None = None
+    reason: str = ""
+    scope_configured: bool
+    includes: list[str]
+    excludes: list[str]
+    running_workflows: list[str]
+    traffic: dict[str, Any] | None = None
+
+
+class Environment(Camel):
+    mode: Literal["LIVE", "SIMULATED"]
+    banner: str
+    severity: Literal["info", "warning", "danger"]
+    armed: bool
+    safe_mode: bool
+    scope: list[str]
 
 
 class TopologyNode(Camel):

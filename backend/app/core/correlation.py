@@ -19,10 +19,10 @@ def get_correlation_id() -> str:
 
 class CorrelationMiddleware:
     """Pure ASGI (safe for SSE streaming). Accepts or generates X-Correlation-ID, echoes it, and stamps
-    every response with X-OTProbe-Environment: SIMULATED."""
+    every response with X-OTProbe-Environment: LIVE or SIMULATED."""
 
-    def __init__(self, app) -> None:
-        self.app = app
+    def __init__(self, app, environment: str = "SIMULATED") -> None:
+        self.app, self.environment = app, environment.encode()
 
     async def __call__(self, scope, receive, send) -> None:
         if scope["type"] != "http":
@@ -36,7 +36,7 @@ class CorrelationMiddleware:
             if message["type"] == "http.response.start":
                 headers = list(message.get("headers", []))
                 headers.append((b"x-correlation-id", cid.encode()))
-                headers.append((b"x-otprobe-environment", b"SIMULATED"))
+                headers.append((b"x-otprobe-environment", self.environment))
                 message["headers"] = headers
             await send(message)
 

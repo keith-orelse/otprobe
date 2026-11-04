@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.adapters.base import Protocol, ProtocolAdapter
+from app.adapters.base import REQUIRED_PROTOCOLS, Protocol, ProtocolAdapter
 
 
 def parse_overrides(raw: str) -> dict[str, str]:
@@ -17,7 +17,7 @@ def parse_overrides(raw: str) -> dict[str, str]:
 
 
 class AdapterRegistry:
-    def __init__(self, mode: str = "simulated", overrides: dict[str, str] | None = None) -> None:
+    def __init__(self, mode: str = "real", overrides: dict[str, str] | None = None) -> None:
         self.mode = mode
         self.overrides = overrides or {}
         self._impls: dict[tuple[Protocol, str], ProtocolAdapter] = {}
@@ -35,8 +35,11 @@ class AdapterRegistry:
         except KeyError:
             raise RuntimeError(f"No {impl} adapter registered for protocol '{protocol.value.lower()}'") from None
 
+    def has(self, protocol: Protocol) -> bool:
+        return (protocol, self.selected(protocol)) in self._impls
+
     def validate(self) -> None:
-        for p in Protocol:
+        for p in REQUIRED_PROTOCOLS:
             self.get(p)
 
     def implementations(self, protocol: Protocol) -> dict[str, ProtocolAdapter]:
@@ -45,6 +48,8 @@ class AdapterRegistry:
     def describe(self) -> list[dict[str, Any]]:
         out = []
         for p in Protocol:
+            if not self.has(p):
+                continue
             d = self.get(p).descriptor()
             out.append({"protocol": p.value, "implementation": d.implementation, "simulated": d.simulated,
                         "label": d.display_label})

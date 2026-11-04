@@ -13,7 +13,7 @@ router = APIRouter(tags=["topology"])
 async def health(ctx: AppContext = Depends(get_ctx)) -> dict:
     with ctx.db.session() as s:
         s.execute(text("select 1"))
-    return {"status": "ok", "environment": "SIMULATED", "db": "ok",
+    return {"status": "ok", "environment": "LIVE" if ctx.settings.live else "SIMULATED", "db": "ok",
             "adapters": {"mode": ctx.registry.mode, "overrides": ctx.registry.overrides}}
 
 

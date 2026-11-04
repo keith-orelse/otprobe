@@ -22,8 +22,9 @@ from app.workflow.steps import StepTracker
 
 log = logging.getLogger("otprobe.discovery")
 ACTOR = system("discovery-engine")
-STEPS = ["VALIDATE", "ARP", "ICMP", "SNMP", "MERGE"]
 POSITIVE_ICMP = {"ONLINE", "HIGH_LATENCY"}
+DEFAULT_SNMP_PROFILE = "OT-SNMPV3-RO"
+PROGRESS = (10, 30, 60, 80)   # job progress when each discovery method starts
 
 
 def zones_for_targets(session, targets: list[str]) -> dict[str, Zone]:
@@ -50,6 +51,7 @@ def baseline_zone_ids(session, zones: list[Zone], exclude_job: str) -> set[str]:
 class DiscoveryEngine:
     def __init__(self, ctx: AppContext) -> None:
         self.ctx = ctx
+        self.stats = None   # live mode: the network gate's traffic counters for this job
 
     def _progress(self, job_id: str, progress: int, phase: str) -> None:
         with self.ctx.db.session() as s:
@@ -67,7 +69,11 @@ class DiscoveryEngine:
             job.started_at, job.phase = utcnow(), "VALIDATE"
             targets, methods = list(job.targets), list(job.methods)
         try:
-            await self._run(job_id, targets, methods, tracker)
+            if self.ctx.gate is None:
+                await self._run(job_id, targets, methods, tracker)
+            else:
+                with self.ctx.gate.track() as self.stats:
+                    await self._run(job_id, targets, methods, tracker)
         except asyncio.CancelledError:
             with db.session() as s:
                 job = s.get(DiscoveryJob, job_id)
@@ -85,68 +91,94 @@ class DiscoveryEngine:
 
     async def _run(self, job_id: str, targets: list[str], methods: list[str], tracker: StepTracker) -> None:
         ctx, db = self.ctx, self.ctx.db
-        tracker.plan(STEPS)
+        arp = ctx.registry.get(Protocol.ARP)
+        # Real ARP reads the neighbour cache the ICMP sweep just filled, so it runs after ICMP. In live mode TCP and
+        # SNMP only visit hosts already seen in this job, which keeps traffic to silent addresses at zero.
+        order = ["ICMP", "ARP", "TCP", "SNMP"] if arp.runs_after_sweep else ["ARP", "ICMP", "TCP", "SNMP"]
+        available = [m for m in order if m != "TCP" or ctx.registry.has(Protocol.TCP)]
+        tracker.plan(["VALIDATE", *available, "MERGE"])
         tracker.start("VALIDATE", "Resolving targets against configured zones")
         with db.session() as s:
             zone_map = zones_for_targets(s, targets)
             baseline = baseline_zone_ids(s, list(zone_map.values()), job_id)
             safe_targets = [t for t, z in zone_map.items() if z.safe_mode]
+            snmp_profile = s.get(DiscoveryJob, job_id).snmp_profile or DEFAULT_SNMP_PROFILE
         snmp_cred: Credential | None = None
+        snmp_note = ""
         if "SNMP" in methods:
-            snmp_cred = await ctx.vault.resolve("OT-SNMPV3-RO", purpose=f"discovery {job_id}",
-                                                correlation_id=get_correlation_id())
+            try:
+                snmp_cred = await ctx.vault.resolve(snmp_profile, purpose=f"discovery {job_id}",
+                                                    correlation_id=get_correlation_id())
+            except KeyError:
+                snmp_note = f"No credential profile '{snmp_profile}' in the vault"
         await ctx.pacer.sleep(0.3)
         detail = f"{len(targets)} target(s), methods {', '.join(methods)}"
         if safe_targets:
             detail += f". SAFE MODE for {', '.join(safe_targets)}: passive/read-only, rate-limited (Level 0/1)"
         tracker.ok("VALIDATE", detail, {"safeModeTargets": safe_targets, "baselineZones": sorted(baseline)})
-        self._progress(job_id, 10, "ARP")
 
         tlist = [Target(t, credential=snmp_cred, safe_mode=zone_map[t].safe_mode, timeout_sec=1.0) for t in targets]
         seen: dict[str, set[str]] = {}   # asset_id -> methods with a positive response in this job
+        seen_ips: set[str] = set()
 
-        # ARP: devices appear one by one
-        if "ARP" in methods:
-            tracker.start("ARP", "Reading ARP/neighbor tables (switch span)")
-            arp = ctx.registry.get(Protocol.ARP)
-            n = 0
-            for t in tlist:
-                async for host in arp.discover(t):
-                    n += 1
-                    self._on_arp(job_id, host, baseline, seen)
-                    tracker.update("ARP", f"{n} host(s) answered ARP")
-            tracker.ok("ARP", f"{n} host(s) answered ARP")
-        else:
-            tracker.skip("ARP", "Method not selected")
-        self._progress(job_id, 30, "ICMP")
+        def restricted(t: Target) -> Target:
+            if not arp.runs_after_sweep:
+                return t
+            return Target(t.address, credential=t.credential, safe_mode=t.safe_mode, timeout_sec=t.timeout_sec,
+                          options={"hosts": sorted(seen_ips)})
 
-        if "ICMP" in methods:
-            tracker.start("ICMP", "Echo sweep (rate-limited in safe mode)")
-            icmp = ctx.registry.get(Protocol.ICMP)
-            replies = blocked = 0
-            for t in tlist:
-                async for host in icmp.discover(t):
-                    positive = host.data.get("reachability.icmp") in POSITIVE_ICMP
-                    replies += positive
-                    blocked += not positive
-                    self._on_ip_only(job_id, host, positive, seen)
-            tracker.ok("ICMP", f"{replies} echo repl{'y' if replies == 1 else 'ies'}, {blocked} filtered. "
-                               "No ICMP reply does not mean a device is offline.")
-        else:
-            tracker.skip("ICMP", "Method not selected")
-        self._progress(job_id, 60, "SNMP")
-
-        if "SNMP" in methods:
-            tracker.start("SNMP", "SNMPv3 GET sysName/sysDescr/entity (read-only profile OT-SNMPV3-RO)")
-            snmp = ctx.registry.get(Protocol.SNMP)
-            n = 0
-            for t in tlist:
-                async for host in snmp.discover(t):
-                    n += 1
-                    self._on_ip_only(job_id, host, True, seen)
-            tracker.ok("SNMP", f"{n} SNMP agent(s) responded")
-        else:
-            tracker.skip("SNMP", "Method not selected")
+        for i, method in enumerate(available):
+            self._progress(job_id, PROGRESS[i], method)
+            if method not in methods:
+                tracker.skip(method, "Method not selected")
+                continue
+            if method == "ARP":
+                tracker.start("ARP", arp.descriptor().display_label)
+                n = 0
+                for t in tlist:
+                    async for host in arp.discover(t):
+                        n += 1
+                        seen_ips.add(host.ip)
+                        self._on_arp(job_id, host, baseline, seen)
+                        tracker.update("ARP", f"{n} host(s) answered ARP")
+                tracker.ok("ARP", f"{n} host(s) answered ARP")
+            elif method == "ICMP":
+                tracker.start("ICMP", "Echo sweep (rate-limited in safe mode)")
+                icmp = ctx.registry.get(Protocol.ICMP)
+                replies = blocked = 0
+                for t in tlist:
+                    async for host in icmp.discover(t):
+                        positive = host.data.get("reachability.icmp") in POSITIVE_ICMP
+                        replies += positive
+                        blocked += not positive
+                        if positive:
+                            seen_ips.add(host.ip)
+                        self._on_ip_only(job_id, host, positive, baseline, seen)
+                        tracker.update("ICMP", f"{replies} echo repl{'y' if replies == 1 else 'ies'} so far")
+                tracker.ok("ICMP", f"{replies} echo repl{'y' if replies == 1 else 'ies'}, {blocked} filtered. "
+                                   "No ICMP reply does not mean a device is offline.")
+            elif method == "TCP":
+                tracker.start("TCP", "TCP connect to known OT/IT service ports (no payload)")
+                tcp = ctx.registry.get(Protocol.TCP)
+                n = 0
+                for t in tlist:
+                    async for host in tcp.discover(restricted(t)):
+                        n += 1
+                        self._on_ip_only(job_id, host, True, baseline, seen)
+                        tracker.update("TCP", f"{n} host(s) answered on TCP")
+                tracker.ok("TCP", f"{n} host(s) answered on TCP")
+            elif method == "SNMP":
+                if snmp_cred is None:
+                    tracker.skip("SNMP", snmp_note)
+                    continue
+                tracker.start("SNMP", f"SNMP GET sysName/sysDescr/sysObjectID (read-only profile {snmp_profile})")
+                snmp = ctx.registry.get(Protocol.SNMP)
+                n = 0
+                for t in tlist:
+                    async for host in snmp.discover(restricted(t)):
+                        n += 1
+                        self._on_ip_only(job_id, host, True, baseline, seen)
+                tracker.ok("SNMP", f"{n} SNMP agent(s) responded")
 
         tracker.start("MERGE", "Reconciling inventory")
         with db.session() as s:
@@ -170,17 +202,21 @@ class DiscoveryEngine:
         self._progress(job_id, 100, "DONE")
         with db.session() as s:
             job = s.get(DiscoveryJob, job_id)
-            DISCOVERY.transition(s, job, "COMPLETED", ACTOR, details={
-                "devicesFound": job.devices_found, "newAssets": job.new_assets, "rogue": job.rogue_count})
+            details = {"devicesFound": job.devices_found, "newAssets": job.new_assets, "rogue": job.rogue_count}
+            if self.stats is not None:
+                details["traffic"] = self.stats.as_dict()
+            DISCOVERY.transition(s, job, "COMPLETED", ACTOR, details=details)
             job.finished_at = utcnow()
+
+    def _open_rogue_finding(self, session, asset_id: str, ip: str, mac: str | None) -> None:
+        rule = next(r for r in self.ctx.rules.policies["network-hygiene"]["rules"] if r["id"] == "NET-ROGUE-001")
+        open_event_finding(session, asset_id, rule, {"ip": ip, "mac": mac, "authorized": False}, ACTOR)
 
     def _on_arp(self, job_id: str, host: DiscoveredHost, baseline: set[str], seen: dict[str, set[str]]) -> None:
         with self.ctx.db.session() as s:
             asset, created, rogue = merge_observation(s, host.ip, host.mac, ACTOR, baseline)
             if rogue:
-                rule = next(r for r in self.ctx.rules.policies["network-hygiene"]["rules"]
-                            if r["id"] == "NET-ROGUE-001")
-                open_event_finding(s, asset.id, rule, {"ip": host.ip, "mac": host.mac, "authorized": False}, ACTOR)
+                self._open_rogue_finding(s, asset.id, host.ip, host.mac)
             upsert_fields(s, asset.id, host.data, "ARP", "DISCOVERY", "DISCOVERY", job_id)
             s.add(DiscoveryObservation(job_id=job_id, asset_id=asset.id, ip=host.ip, mac=host.mac, method="ARP",
                                        responded=True, result=host.data))
@@ -195,19 +231,32 @@ class DiscoveryEngine:
                          {"assetId": asset.id, "ip": host.ip, "mac": host.mac, "method": "ARP", "new": created,
                           "rogue": rogue, "devicesFound": job.devices_found})
 
-    def _on_ip_only(self, job_id: str, host: DiscoveredHost, positive: bool, seen: dict[str, set[str]]) -> None:
+    def _on_ip_only(self, job_id: str, host: DiscoveredHost, positive: bool, baseline: set[str],
+                    seen: dict[str, set[str]]) -> None:
         method = host.method.value
         with self.ctx.db.session() as s:
             asset = s.scalar(select(Asset).where(Asset.ip == host.ip))
+            created = rogue = False
+            if asset is None and positive:
+                # A host that answers but has no MAC (yet): remote subnet, or ARP has not run.
+                asset, created, rogue = merge_observation(s, host.ip, None, ACTOR, baseline)
+                if rogue:
+                    self._open_rogue_finding(s, asset.id, host.ip, None)
             s.add(DiscoveryObservation(job_id=job_id, asset_id=asset.id if asset else None, ip=host.ip, mac=None,
                                        method=method, responded=positive, result=host.data))
             if asset is None:
-                return  # IP-only response, awaiting ARP (kept as observation)
+                return  # silent IP (kept as an observation)
             upsert_fields(s, asset.id, host.data, method, "DISCOVERY", "DISCOVERY", job_id)
+            job = s.get(DiscoveryJob, job_id)
             if positive:
                 seen.setdefault(asset.id, set()).add(method)
                 asset.discovered_by = sorted(set(asset.discovered_by or []) | {method})
                 asset.status, asset.last_seen = "ONLINE", utcnow()
-                job = s.get(DiscoveryJob, job_id)
                 job.devices_found = len(seen)
+            job.new_assets += created
+            job.rogue_count += rogue
             refresh_asset(s, asset, self.ctx.rules)
+            if created:
+                events.stage(s, "discovery.device_found", "discovery", job_id,
+                             {"assetId": asset.id, "ip": host.ip, "mac": None, "method": method, "new": True,
+                              "rogue": rogue, "devicesFound": job.devices_found})

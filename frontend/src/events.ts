@@ -81,6 +81,11 @@ export function useServerEvents(): void {
       }
       if (topic === "telemetry") qc.invalidateQueries({ queryKey: ["telemetry"] });
       if (topic === "demo") qc.invalidateQueries();
+      if (topic === "safety") {
+        qc.invalidateQueries({ queryKey: ["environment"] });
+        qc.invalidateQueries({ queryKey: ["safety"] });
+        qc.invalidateQueries({ queryKey: ["scope"] });
+      }
       if (topic === "agent") {
         qc.invalidateQueries({ queryKey: ["agents"] });
         if (e.type !== "agent.heartbeat") qc.invalidateQueries({ queryKey: ["asset"] });
@@ -90,7 +95,7 @@ export function useServerEvents(): void {
       "asset.updated", "asset.rogue", "probe.status", "probe.step", "audit.event", "deployment.status",
       "deployment.step", "deployment.precheck", "approval.status", "agent.status", "agent.heartbeat",
       "assessment.status", "finding.status", "finding.updated", "drift.detected", "task.status",
-      "removal.status", "removal.step", "telemetry.message", "demo.reset"];
+      "removal.status", "removal.step", "telemetry.message", "demo.reset", "safety.updated"];
     connect();
     return () => { closed = true; window.clearTimeout(retry); es?.close(); };
   }, [qc]);

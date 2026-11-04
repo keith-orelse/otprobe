@@ -12,6 +12,7 @@ from app.core.correlation import get_correlation_id
 from app.core.errors import ProblemError, not_found
 from app.engines.probing.engine import ProbeEngine
 from app.models import Asset, ProbeResult, ProbeRun, WorkflowStep
+from app.services import safety
 from app.services.common import paginate
 from app.workflow.machine import PROBE
 
@@ -33,6 +34,7 @@ def create_probe(ctx: AppContext, session: Session, asset_id: str, actor: Actor
     asset = session.get(Asset, asset_id)
     if asset is None:
         raise not_found("Asset", asset_id)
+    safety.ensure_can_scan(ctx, session, [asset.ip])
     active = session.scalar(select(ProbeRun).where(ProbeRun.asset_id == asset_id,
                                                    ProbeRun.status.in_(["QUEUED", "RUNNING"])))
     if active is not None:

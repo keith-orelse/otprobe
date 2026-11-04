@@ -7,6 +7,7 @@ GROUPS: dict[str, list[str]] = {
                  "snmp.sys_object_id", "hardware.vendor", "hardware.model"],
     "Network": ["network.ip", "network.mac", "reachability.icmp", "reachability.rtt_ms", "network.interfaces",
                 "network.active_ports", "network.lldp_neighbors", "network.listening", "network.connections",
+                "network.open_ports", "network.arp_via",
                 "mqtt.client_id", "mqtt.topics", "mqtt.broker"],
     "Hardware": ["hardware.manufacturer", "hardware.cpu", "hardware.ram_gb", "hardware.disk",
                  "hardware.uptime_sec", "snmp.uptime_sec"],
@@ -29,6 +30,6 @@ GROUPS: dict[str, list[str]] = {
 PROVENANCE_FIELDS: frozenset[str] = frozenset(p for paths in GROUPS.values() for p in paths)
 GROUP_OF: dict[str, str] = {p: g for g, paths in GROUPS.items() for p in paths}
 
-SOURCES = ("ARP", "ICMP", "SNMP", "WinRM", "WMI", "SSH", "MQTT", "DEEP_AGENT")
+SOURCES = ("ARP", "ICMP", "TCP", "SNMP", "WinRM", "WMI", "SSH", "MQTT", "DEEP_AGENT")
 STAGES = ("DISCOVERY", "AGENTLESS", "DEEP")
 STAGE_RANK = {"DISCOVERY": 0, "AGENTLESS": 1, "DEEP": 2}

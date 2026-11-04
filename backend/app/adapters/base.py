@@ -1,8 +1,8 @@
 """Protocol abstraction layer.
 
-Engines depend ONLY on the interfaces in this module. Simulated implementations live in
-``app.adapters.simulated``; real implementations (not part of the POC) would live in
-``app.adapters.real``. Both must pass ``tests/contract``.
+Engines depend ONLY on the interfaces in this module. Real implementations live in ``app.adapters.real``
+(live network, behind the network gate); simulated ones in ``app.adapters.simulated`` (POC and tests).
+Both must pass ``tests/contract``.
 
 Every adapter returns normalised data keyed by provenance field paths (see docs/PROVENANCE.md),
 so business code never sees protocol-specific shapes.
@@ -25,6 +25,12 @@ class Protocol(str, enum.Enum):
     WMI = "WMI"
     MQTT = "MQTT"
     SSH = "SSH"
+    TCP = "TCP"
+
+
+# Protocols every adapter set must provide. TCP is optional (the simulated POC has no TCP step).
+REQUIRED_PROTOCOLS = (Protocol.ICMP, Protocol.ARP, Protocol.SNMP, Protocol.WINRM, Protocol.WMI, Protocol.MQTT,
+                      Protocol.SSH)
 
 
 class ResultStatus(str, enum.Enum):
@@ -166,6 +172,15 @@ class IcmpAdapter(ProtocolAdapter):
 
 class ArpAdapter(ProtocolAdapter):
     protocol = Protocol.ARP
+    # True when the adapter reads neighbour caches filled by earlier sweeps (real ARP); discovery then runs
+    # the ARP step after ICMP instead of first.
+    runs_after_sweep: bool = False
+
+
+class TcpAdapter(ProtocolAdapter):
+    """TCP connect to a fixed port list; no payload. discover() honours ``target.options["hosts"]``."""
+
+    protocol = Protocol.TCP
 
 
 class SnmpAdapter(ProtocolAdapter):
@@ -294,6 +309,14 @@ class CredentialVault(abc.ABC):
 
     @abc.abstractmethod
     async def list_profiles(self) -> list[MaskedCredential]: ...
+
+    @abc.abstractmethod
+    async def store(self, profile: str, protocol: str, username: str, secret: str | None,
+                    params: Mapping[str, Any], description: str) -> MaskedCredential:
+        """Create or update a profile. ``secret=None`` keeps the stored secret (rename/param change only)."""
+
+    @abc.abstractmethod
+    async def delete(self, profile: str) -> None: ...
 
 
 class SimulationControl(abc.ABC):

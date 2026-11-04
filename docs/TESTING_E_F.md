@@ -7,7 +7,7 @@ database upgrades itself on start (migration `0003`), and existing data is kept.
 
 ```bash
 # Terminal 1: API
-cd backend && SPEED_FACTOR=0.5 HEARTBEAT_INTERVAL_SEC=2 .venv/bin/uvicorn app.main:app --port 8000
+cd backend && ADAPTER_MODE=simulated SPEED_FACTOR=0.5 HEARTBEAT_INTERVAL_SEC=2 .venv/bin/uvicorn app.main:app --port 8000
 # Terminal 2: console (needs no restart; Vite picks up changes)
 cd frontend && npm run dev
 # Terminal 3: agent runtime

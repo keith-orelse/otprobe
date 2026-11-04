@@ -1,5 +1,8 @@
-# OTProbe POC — one command, no external infrastructure.
-# SIMULATED ENVIRONMENT - NO REAL DEVICES ARE BEING SCANNED
+# OTProbe. Default: LIVE network mode (docs/LIVE_ARCHITECTURE.md) on a Linux host.
+#   docker compose up -d                                   live mode: real adapters, nothing scanned until an
+#                                                          admin adds a scan scope (Settings -> Scan scope)
+#   ADAPTER_MODE=simulated docker compose --profile simulated up -d
+#                                                          the original simulated POC (no real devices contacted)
 name: otprobe
 
 x-sim-env: &sim-env
@@ -8,23 +11,37 @@ x-sim-env: &sim-env
   HEARTBEAT_INTERVAL_SEC: ${HEARTBEAT_INTERVAL_SEC:-10}
   SIM_SERVICE_TOKEN: ${SIM_SERVICE_TOKEN:-change-me-sim-token}
 
+# The API uses the host's network stack (ARP needs layer 2; scans must leave from the host's own address), so the
+# other containers reach it through the host gateway under the name "api".
+x-api-host: &api-host
+  extra_hosts: ["api:host-gateway"]
+
 services:
   api:
     build: { context: ., dockerfile: backend/Dockerfile }
+    network_mode: host
+    cap_drop: [ALL]
+    cap_add: [NET_RAW]          # ICMP echo and ARP only
     environment:
       <<: *sim-env
+      ADAPTER_MODE: ${ADAPTER_MODE:-real}
+      SAFE_MODE: ${SAFE_MODE:-true}
+      SCAN_MAX_PPS: ${SCAN_MAX_PPS:-50}
       ASSESSMENT_INTERVAL_SEC: ${ASSESSMENT_INTERVAL_SEC:-300}
       ASSESSMENT_TIMEOUT_SEC: ${ASSESSMENT_TIMEOUT_SEC:-120}
       ENROLLMENT_TIMEOUT_SEC: ${ENROLLMENT_TIMEOUT_SEC:-120}
       DATABASE_URL: sqlite:////data/otprobe.db
-      ADAPTER_MODE: simulated
-      JWT_SECRET: ${JWT_SECRET:-change-me-demo-jwt-secret-at-least-32-bytes}
       VAULT_KEY: ${VAULT_KEY:-}
+      VAULT_KEY_FILE: /keys/otprobe-vault.key     # separate volume: never in backups of the data volume
+      JWT_SECRET: ${JWT_SECRET:-change-me-demo-jwt-secret-at-least-32-bytes}   # live mode replaces the demo value
+      OTPROBE_ADMIN_PASSWORD: ${OTPROBE_ADMIN_PASSWORD:-}
+      OTPROBE_OPERATOR_PASSWORD: ${OTPROBE_OPERATOR_PASSWORD:-}
+      OTPROBE_APPROVER_PASSWORD: ${OTPROBE_APPROVER_PASSWORD:-}
       RULES_DIR: /app/rules
-      AGENT_SERVER_URL: http://api:8000
+      AGENT_SERVER_URL: ${AGENT_SERVER_URL:-http://api:8000}
     volumes:
       - otprobe-data:/data
-    ports: ["8000:8000"]
+      - otprobe-keys:/keys
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8000/api/v1/health')"]
       interval: 5s
@@ -32,8 +49,10 @@ services:
       retries: 20
 
   agent-runtime:
-    # Simulated Probe Agents. Separate process; outbound HTTP to the API only (enroll, heartbeat, task polling).
+    # SIMULATED mode only: simulated Probe Agents (the Go agent replaces this in phase L4).
+    profiles: [simulated]
     build: { context: ., dockerfile: agent/Dockerfile }
+    <<: *api-host
     environment:
       <<: *sim-env
       OTPROBE_API_URL: http://api:8000
@@ -42,8 +61,10 @@ services:
     restart: unless-stopped
 
   telemetry-sim:
-    # Simulated MQTT publishers (sensors, PLC status). Separate process; publishes via the in-process broker.
+    # SIMULATED mode only: simulated MQTT publishers (the bundled Mosquitto replaces this in phase L5).
+    profiles: [simulated]
     build: { context: ., dockerfile: telemetry/Dockerfile }
+    <<: *api-host
     environment:
       <<: *sim-env
       OTPROBE_API_URL: http://api:8000
@@ -53,8 +74,10 @@ services:
 
   web:
     build: { context: ., dockerfile: frontend/Dockerfile }
+    <<: *api-host
     ports: ["8080:80"]
     depends_on: { api: { condition: service_healthy } }
 
 volumes:
   otprobe-data:
+  otprobe-keys:

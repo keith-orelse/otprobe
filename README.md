@@ -1,21 +1,44 @@
 # OTProbe
 
-**Simulated OT discovery, agentless probing and deep agent probing: a standalone, fully local proof of concept.**
+**OT asset discovery, agentless probing and deep agent probing.**
 
-> **SIMULATED ENVIRONMENT - NO REAL DEVICES ARE BEING SCANNED.**
-> The OT network, its devices and every protocol response are simulated. The web console, REST API, database,
-> workflows, approvals, compliance rules, findings and audit trail are real.
+OTProbe runs in one of two modes, chosen with `ADAPTER_MODE`:
 
-All five build phases are complete. Acceptance criteria A–K are automated (150 tests, including a Playwright browser
-smoke test).
+| Mode | What it does | Status |
+|---|---|---|
+| `real` (default) | **Live network.** Real ICMP, ARP, TCP and SNMP, behind a network gate that only contacts the approved scan scope. Nothing is scanned until an admin adds a scope. | Phase L2 of the live redesign: discovery and agentless probing. WinRM/SSH (L3), the Go agent (L4) and the MQTT broker (L5) are next. Design: [docs/LIVE_ARCHITECTURE.md](docs/LIVE_ARCHITECTURE.md) |
+| `simulated` | **The original POC.** A simulated OT network; no real devices are contacted. | Complete (phases 1–5, acceptance criteria A–K). Frozen copy on the `simulated` branch |
 
-## Quick start
+## Live mode quick start (Linux)
+
+Read [docs/SAFETY_AND_SCOPE.md](docs/SAFETY_AND_SCOPE.md) first, and only scan networks you have written
+permission to scan.
+
+```bash
+cd backend && python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
+OTPROBE_ADMIN_PASSWORD='choose-a-long-one' OTPROBE_OPERATOR_PASSWORD='choose-another' \
+OTPROBE_APPROVER_PASSWORD='and-a-third-one' .venv/bin/uvicorn app.main:app --port 8000
+cd frontend && npm install && npm run dev            # http://localhost:5173
+```
+
+1. Sign in as `admin`. The banner reads **NO SCAN SCOPE CONFIGURED (scanning disabled)**.
+2. **Settings → Scan scope:** add the approved subnet(s), with a safety profile, Purdue level and who authorised it.
+   Add exclusions for anything that must never be touched.
+3. **Settings → Credential vault:** add `OT-SNMPV3-RO` (or another SNMP profile) if devices answer SNMP.
+4. **Discovery:** pick the range and start. Safe mode is on by default (≤ 10 packets/s per range, ≤ 1 operation/s
+   per host). **STOP ALL** in the top bar halts everything at once; only an admin can re-arm.
+
+ICMP needs `net.ipv4.ping_group_range` to include the service's group, or `CAP_NET_RAW`. Docker Compose
+(`docker compose up -d`) runs the API with host networking and `CAP_NET_RAW`; see the notes in
+`docker-compose.yml` (not yet verified on a Docker host).
+
+## Simulated mode quick start
 
 ### Docker (one command)
 
 ```bash
 cp .env.example .env
-docker compose up --build
+ADAPTER_MODE=simulated docker compose --profile simulated up --build
 # Console http://localhost:8080 · API docs http://localhost:8000/docs
 ```
 
@@ -36,7 +59,7 @@ cd frontend && npm install
 Run each of these in its own terminal:
 
 ```bash
-cd backend   && SPEED_FACTOR=0.5 HEARTBEAT_INTERVAL_SEC=2 .venv/bin/uvicorn app.main:app --port 8000
+cd backend   && ADAPTER_MODE=simulated SPEED_FACTOR=0.5 HEARTBEAT_INTERVAL_SEC=2 .venv/bin/uvicorn app.main:app --port 8000
 cd frontend  && npm run dev                                                          # http://localhost:5173
 cd agent     && OTPROBE_API_URL=http://127.0.0.1:8000 ../backend/.venv/bin/python -m otprobe_agent
 cd telemetry && OTPROBE_API_URL=http://127.0.0.1:8000 ../backend/.venv/bin/python -m otprobe_telemetry

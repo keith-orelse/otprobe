@@ -3,7 +3,7 @@
 Start the three processes (each in its own terminal), or use `docker compose up`:
 
 ```bash
-cd backend && SPEED_FACTOR=0.5 HEARTBEAT_INTERVAL_SEC=2 .venv/bin/uvicorn app.main:app --port 8000
+cd backend && ADAPTER_MODE=simulated SPEED_FACTOR=0.5 HEARTBEAT_INTERVAL_SEC=2 .venv/bin/uvicorn app.main:app --port 8000
 cd frontend && npm run dev
 cd agent && OTPROBE_API_URL=http://127.0.0.1:8000 ../backend/.venv/bin/python -m otprobe_agent
 ```

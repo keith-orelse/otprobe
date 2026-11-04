@@ -10,7 +10,8 @@ testpaths = ["tests"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 markers = ["acceptance: end-to-end acceptance criteria A-K", "contract: adapter contract suite",
-           "e2e: browser smoke test (Playwright); run with -m e2e"]
+           "e2e: browser smoke test (Playwright); run with -m e2e",
+           "live: live-mode tests against 127.0.0.1 only (real adapters, network gate)"]
 addopts = "-m 'not e2e'"
 
 [tool.ruff]
@@ -53,3 +54,15 @@ name = "Simulator-facing /sim API never touches business services"
 type = "forbidden"
 source_modules = ["app.api.sim"]
 forbidden_modules = ["app.services", "app.engines"]
+
+[[tool.importlinter.contracts]]
+name = "Business layers never import real adapters or the network gate (registry and ctx.gate only)"
+type = "forbidden"
+source_modules = ["app.api.v1", "app.services", "app.engines"]
+forbidden_modules = ["app.adapters.real"]
+
+[[tool.importlinter.contracts]]
+name = "Real adapters do not depend on business code or the simulator"
+type = "forbidden"
+source_modules = ["app.adapters.real"]
+forbidden_modules = ["app.api", "app.services", "app.engines", "app.sim", "app.adapters.simulated"]

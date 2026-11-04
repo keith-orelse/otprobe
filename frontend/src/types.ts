@@ -164,3 +164,15 @@ export interface DemoResetResult { status: string; cleared: Record<string, numbe
 
 export interface NavCounts { pendingApprovals: number; openFindings: number; criticalFindings: number;
   agentsAttention: number; rogueAssets: number; runningWorkflows: number }
+
+export interface Environment { mode: "LIVE" | "SIMULATED"; banner: string; severity: "info" | "warning" | "danger";
+  armed: boolean; safeMode: boolean; scope: string[] }
+
+export interface ScanScope { id: string; cidr: string; kind: "INCLUDE" | "EXCLUDE"; profile: "IT" | "OT_SENSITIVE";
+  level: string; label: string; authorization: string; plugins: string[]; createdBy: string; createdAt: string;
+  disabledAt: string | null }
+
+export interface SafetyView { live: boolean; armed: boolean; safeMode: boolean; changedBy: string | null;
+  changedAt: string | null; reason: string; scopeConfigured: boolean; includes: string[]; excludes: string[];
+  runningWorkflows: string[]; traffic: { sent: number; byOperation: Record<string, number>;
+    blocked: Record<string, number>; rateLimitedSec: number } | null }

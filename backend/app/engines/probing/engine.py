@@ -39,6 +39,13 @@ class ProbeEngine:
                               error_code=res.error_code, error_detail=res.error_detail,
                               collected_at=res.collected_at or utcnow()))
 
+    async def _cred(self, profile: str, probe_id: str, cid: str):
+        """The vault credential, or None when the profile does not exist (live installs start with an empty vault)."""
+        try:
+            return await self.ctx.vault.resolve(profile, purpose=f"agentless probe {probe_id}", correlation_id=cid)
+        except KeyError:
+            return None
+
     def _audit(self, asset_id: str, event: str, detail: str | None) -> None:
         with self.ctx.db.session() as s:
             audit.record(s, ACTOR, event, "asset", asset_id, {"message": detail})
@@ -50,7 +57,10 @@ class ProbeEngine:
             run = s.get(ProbeRun, probe_id)
             PROBE.transition(s, run, "RUNNING", ACTOR)
             run.started_at = utcnow()
-        tracker.plan(STEPS)
+        steps = list(STEPS)
+        if self.ctx.registry.has(Protocol.TCP):
+            steps.insert(steps.index("ARP") + 1, "TCP")
+        tracker.plan(steps)
         try:
             await self._run(probe_id, tracker)
         except asyncio.CancelledError:
@@ -100,13 +110,29 @@ class ProbeEngine:
         res = record(await reg.get(Protocol.ARP).health_check(Target(ip, safe_mode=safe)))
         arp_up = res.ok
         if arp_up:
-            seen_mac = res.data.get("network.mac")
-            note = "" if seen_mac == mac else f" (WARNING: expected {mac})"
-            tracker.ok("ARP", f"{ip} is-at {seen_mac}{note}")
+            seen_mac, via = res.data.get("network.mac"), res.data.get("network.arp_via")
+            if via:
+                tracker.ok("ARP", f"Answered by {via} (proxy ARP: the same MAC answers for {res.raw.get('sharedBy')} "
+                                  "addresses), so this device's own MAC is not visible")
+            else:
+                note = f" (WARNING: expected {mac})" if mac and seen_mac != mac else ""
+                tracker.ok("ARP", f"{ip} is-at {seen_mac}{note}")
         else:
             tracker.fail("ARP", res.error_detail or "No ARP entry")
 
-        if not (icmp_up or arp_up):
+        tcp_up = False
+        if reg.has(Protocol.TCP):
+            tracker.start("TCP", "TCP connect to known service ports (no payload)")
+            res = record(await reg.get(Protocol.TCP).probe(Target(ip, safe_mode=safe), Query([])))
+            tcp_up = res.status in (ResultStatus.OK, ResultStatus.REFUSED)
+            if res.ok:
+                tracker.ok("TCP", f"Open ports: {', '.join(map(str, res.data.get('network.open_ports', [])))}")
+            elif tcp_up:
+                tracker.ok("TCP", "Host answered; every checked port is closed")
+            else:
+                tracker.fail("TCP", res.error_detail or res.status.value)
+
+        if not (icmp_up or arp_up or tcp_up):
             tracker.skip_remaining("Device not reachable by ARP or ICMP")
             with db.session() as s:
                 a = s.get(Asset, asset_id)
@@ -127,7 +153,12 @@ class ProbeEngine:
             tracker.skip("WINRM", SAFE_MODE_SKIP)
         else:
             hc = await winrm.health_check(Target(ip, port=5986))
-            if not hc.ok:
+            cred = None if not hc.ok else await self._cred("OT-WINDOWS-READONLY", probe_id, cid)
+            if hc.status == ResultStatus.NOT_SUPPORTED:
+                tracker.skip("WINRM", hc.error_detail or "WinRM not available")
+            elif hc.ok and cred is None:
+                tracker.skip("WINRM", "No credential profile 'OT-WINDOWS-READONLY' in the vault")
+            elif not hc.ok:
                 if known.get("services.winrm.available"):
                     record(hc)
                     failed.append("WINRM")
@@ -136,8 +167,6 @@ class ProbeEngine:
                 else:
                     tracker.skip("WINRM", "TCP 5986 closed: WinRM not available on this device")
             else:
-                cred = await ctx.vault.resolve("OT-WINDOWS-READONLY", purpose=f"agentless probe {probe_id}",
-                                               correlation_id=cid)
                 stages: list[dict[str, Any]] = []
 
                 async def on_stage(st: Stage) -> None:
@@ -168,10 +197,13 @@ class ProbeEngine:
 
         # SNMP
         tracker.start("SNMP", "SNMPv3 GET (read-only profile OT-SNMPV3-RO)")
-        snmp_cred = await ctx.vault.resolve("OT-SNMPV3-RO", purpose=f"agentless probe {probe_id}", correlation_id=cid)
-        res = await reg.get(Protocol.SNMP).probe(Target(ip, credential=snmp_cred, safe_mode=safe, timeout_sec=2.0),
-                                                 Query(["system", "interfaces", "entity", "lldp", "plc"]))
-        if res.ok:
+        snmp_cred = await self._cred("OT-SNMPV3-RO", probe_id, cid)
+        res = None if snmp_cred is None else await reg.get(Protocol.SNMP).probe(
+            Target(ip, credential=snmp_cred, safe_mode=safe, timeout_sec=2.0),
+            Query(["system", "interfaces", "entity", "lldp", "plc"]))
+        if res is None:
+            tracker.skip("SNMP", "No credential profile 'OT-SNMPV3-RO' in the vault")
+        elif res.ok:
             record(res)
             parts = [f"sysName {res.data.get('snmp.sys_name')}"]
             if "network.active_ports" in res.data:
@@ -195,11 +227,14 @@ class ProbeEngine:
             tracker.skip("SSH", SAFE_MODE_SKIP)
         else:
             hc = await ssh.health_check(Target(ip, port=22))
-            if hc.status in (ResultStatus.REFUSED, ResultStatus.UNREACHABLE):
+            ssh_cred = None
+            if hc.status == ResultStatus.NOT_SUPPORTED:
+                tracker.skip("SSH", hc.error_detail or "SSH not available")
+            elif hc.status in (ResultStatus.REFUSED, ResultStatus.UNREACHABLE):
                 tracker.skip("SSH", "TCP 22 closed: SSH not available on this device")
+            elif (ssh_cred := await self._cred("OT-LINUX-SSH-RO", probe_id, cid)) is None:
+                tracker.skip("SSH", "No credential profile 'OT-LINUX-SSH-RO' in the vault")
             else:
-                ssh_cred = await ctx.vault.resolve("OT-LINUX-SSH-RO", purpose=f"agentless probe {probe_id}",
-                                                   correlation_id=cid)
                 res = record(await ssh.probe(Target(ip, port=22, credential=ssh_cred), Query(["identity"])))
                 if res.ok:
                     tracker.ok("SSH", f"{res.data.get('os.product')} · kernel {res.data.get('os.kernel')}")

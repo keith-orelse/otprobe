@@ -49,3 +49,12 @@ export function apiLogin(username: string, password: string) {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username, password }),
   }).then((r) => handle<{ accessToken: string }>(r));
 }
+
+/** PUT / PATCH / DELETE. Carries an Idempotency-Key too (scope changes require one; others ignore it). */
+export function apiSend<T>(method: "PUT" | "PATCH" | "DELETE", path: string, body?: unknown): Promise<T> {
+  return fetch(`/api/v1${path}`, {
+    method,
+    headers: headers({ "Content-Type": "application/json", "Idempotency-Key": crypto.randomUUID() }),
+    body: body === undefined ? undefined : JSON.stringify(body),
+  }).then((r) => handle<T>(r));
+}

@@ -65,3 +65,58 @@ Phase 2 went ahead with these defaults.
 | N26 | Agent restart | A crash stops the simulated `OTProbeAgent` service. The recovery is **RESTART AGENT SERVICE** (WinRM `Start-Service`); the agent then resumes with its saved credential |
 | N27 | Agent runtime reinstall detection | A stopped (revoked or crashed) agent is keyed to its deployment id, so a fast remove-and-reinstall is always seen as a new install. This fixed a race found by the enrollment-failure test |
 | N28 | Docker | `docker compose up` (api, agent-runtime, telemetry-sim, web) is defined but **not verified on this machine**, because Docker is not installed. Everything was verified as local processes, including the agent and telemetry as separate OS processes |
+
+## Live network redesign (phase L1, for review)
+
+Design: [LIVE_ARCHITECTURE.md](LIVE_ARCHITECTURE.md) and the documents it links.
+
+### Decisions agreed
+
+| # | Decision |
+|---|---|
+| R1 | `main` becomes the real-network product. The simulated POC is kept, frozen, on the `simulated` branch. Work happens on `real-network` and merges into `main` after each approved phase |
+| R2 | The OTProbe server runs on **Linux** (Docker Compose with host networking, or systemd) |
+| R3 | The agent is rewritten in **Go**: one codebase, a separate build per OS/arch (including legacy Windows 7/2008 R2/2012 builds on Go 1.20). It is installed and removed by generated scripts (`install.ps1`/`install.sh`) |
+| R4 | **Option A:** the agent runs fixed, compiled-in, read-only checks only. The server cannot send scripts or commands to it. New checks ship as a new agent version through an approved UPGRADE deployment |
+| R5 | OTProbe **ships its own MQTT broker** (Mosquitto 2.0, TLS, no anonymous access). OTProbe subscribes only |
+| R6 | Device coverage in three tiers: agent / agentless host / read-only identification for PLCs and network devices. Unknown devices are still listed |
+| R7 | Permission to scan is given. The **subnets are decided later**: the scan scope is configured in the console, is empty by default, and blocks all network activity while empty |
+
+### Defaults proposed in this design (please confirm or change)
+
+| # | Topic | Default in the docs |
+|---|---|---|
+| D1 | New scope entries' safety profile | `OT_SENSITIVE` (10 pkt/s, 1 op/s per host, plugins off until enabled) |
+| D2 | `SAFE_MODE` at install | On. An admin turns it off with a reason |
+| D3 | Active OT protocols | Modbus FC43, S7 SZL read, ENIP ListIdentity, BACnet ReadProperty, OPC UA GetEndpoints. **Never active:** DNP3, IEC 104, PROFINET DCP (passive later) |
+| D4 | Agent transfer mode | PULL over HTTPS by default. PUSH (copy over WinRM/SSH) for legacy Windows and hosts without a TLS 1.2 client |
+| D5 | Kill switch | Operators can stop; only admins can re-arm |
+| D6 | Demo Controls / Reset POC on `main` | Removed. Admin keeps an audited "Clear inventory" |
+| D7 | New rules | `WIN-PATCH-002`, `WIN-RDP-001`, `WIN-SMB-001`, a Windows server baseline, a Linux host baseline, `MQTT-BRK-*`, `NET-MQTT-*` |
+| D8 | macOS agent build | Built but not tested in the lab unless a Mac target is in scope |
+
+### Open questions
+
+| # | Question | Why it matters |
+|---|---|---|
+| O1 | Is there a code-signing certificate for Windows (Authenticode)? | Unsigned binaries may be blocked by AppLocker/WDAC or flagged by AV on hardened hosts. Without one, we rely on SHA-256 + the Ed25519-signed `SHA256SUMS` |
+| O2 | Missing-patch detection on Windows: is there a WSUS server, or can we use an offline catalog (`wsusscn2.cab`, ~1 GB, refreshed monthly)? | Without either, `WIN-PATCH-001` reports UNKNOWN and only `WIN-PATCH-002` (days since last update) is evaluated |
+| O3 | Are target Windows hosts set up for WinRM over **HTTPS** (5986), or only HTTP 5985? Domain-joined (Kerberos) or local accounts (NTLM)? | Decides the default WinRM profile and the lab setup |
+| O4 | Is a Windows 7 / Server 2008 R2 image available for the lab? | Needed to test the legacy build (acceptance L) |
+| O5 | Is any real PLC available for the lab (e.g. S7-1200, Micro800)? | Conpot covers protocol parsing, but only real hardware proves "no disturbance" (L-SAFE-5) |
+| O6 | SQLite or Postgres for the first real deployments? | SQLite is fine for one site and a few hundred assets; Postgres for anything larger |
+
+## Phase L2 notes for review
+
+| # | Topic | What was done / proposed |
+|---|---|---|
+| L2-1 | Simulator still in the code | `ADAPTER_MODE=real` is now the default and loads **no** simulator code (a test checks `sys.modules`). The simulator stays loadable with `ADAPTER_MODE=simulated` because the deployment, agent, assessment and telemetry flows (and 151 tests) still depend on it until their real versions land in L3–L5. It moves out of `app/` into the test suite in L6. This deviates from the L1 plan, which removed it in L2 |
+| L2-2 | ARP in L2 | Reads the kernel neighbour cache after the ICMP sweep (sends nothing itself). Active ARP via scapy was not added: the sweep already makes the kernel ARP every local address, and it avoids a root-only dependency. Remote-subnet ARP over SNMP (router tables) is still to do |
+| L2-3 | TCP and SNMP only visit hosts already seen | In live mode, TCP connect and SNMP run only on hosts that answered ICMP or ARP in the same job. Silent addresses get zero traffic. Trade-off: a remote host that blocks ICMP is missed by discovery (it can still be added by probing its IP directly). A per-scope "full TCP sweep" option can be added if needed |
+| L2-4 | Assets without a MAC | Remote hosts become assets keyed by IP. When a MAC shows up later it is attached (`ASSET_MAC_LEARNED`) |
+| L2-5 | Accounts in live mode | No demo passwords. `admin`, `operator`, `approver` get `OTPROBE_*_PASSWORD` (≥ 12 chars) or a random password printed once in the API log. A user-management page (create users, change password) is not built yet: proposed for L6 |
+| L2-6 | Secrets | Vault: Fernet with a generated key file (0400), never the demo key in live mode. JWT secret: generated key file if the demo value is still set. Vault profiles are write-only through `PUT /api/v1/vault/profiles/{name}` |
+| L2-7 | Kill switch | `POST /safety/stop` closes the gate before the DB commit (fail-safe), then cancels every running workflow. Measured on loopback: no new packets after the stop (test allows the one already in flight). State survives restarts |
+| L2-8 | Docker | Compose now runs the API with `network_mode: host` and only `CAP_NET_RAW`; simulator containers are behind the `simulated` profile. **Not verified** here (Docker is not installed on this machine); to be checked on the Linux lab host |
+| L2-9 | Tests | 179 tests pass: the 151 POC tests (simulated mode) plus 28 new — 12 network-gate unit tests (fake clock), 9 structural safety tests, 7 live tests on 127.0.0.1 against a real TCP listener and a real SNMP agent (v2c + v3 SHA-256/AES). The Playwright smoke test still passes, and the live console was checked in a browser |
+| L2-10 | Proxy ARP (found on a real Wi-Fi) | Testing on an office Wi-Fi showed the router answering ARP for isolated clients with its own MAC, so a laptop and a phone both appeared as `A8:5B:F7:CC:12:A0` and inventory "moved" one onto the other. A MAC that answers for more than one IP in the neighbour table is now recorded as `network.arp_via` and never used as identity; such hosts are tracked by IP. Remaining edge case: when a device with a known MAC really moves (DHCP) onto an IP that already has a MAC-less asset, two assets exist until one is cleared (merge tool proposed for L6) |

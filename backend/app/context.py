@@ -31,6 +31,7 @@ class AppContext:
     sim_control: SimulationControl | None
     tickets: StreamTickets
     extras: dict[str, Any]
+    gate: Any = None            # live mode: app.adapters.real.net.gate.NetworkGate (None when simulated)
     task_signals: dict[str, asyncio.Event] = field(default_factory=dict)
 
     def signal(self, agent_id: str) -> asyncio.Event:

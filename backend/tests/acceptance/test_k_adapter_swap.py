@@ -61,6 +61,6 @@ async def test_override_selects_alternative_adapter(db_path):
             assert health["adapters"]["overrides"] == {"snmp": "fake"}
 
 
-def test_real_mode_fails_fast_without_real_adapters(db_path):
-    with pytest.raises(RuntimeError, match="No real adapter registered for protocol 'icmp'"):
-        build_context(make_settings(db_path, adapter_mode="real"))
+def test_unknown_adapter_fails_fast(db_path):
+    with pytest.raises(RuntimeError, match="No nonexistent adapter registered for protocol 'icmp'"):
+        build_context(make_settings(db_path, adapter_overrides="icmp=nonexistent"))

@@ -20,7 +20,7 @@ class Settings:
     assessment_interval_sec: float = 300.0
     enrollment_token_ttl_sec: int = 900
     enrollment_timeout_sec: float = 120.0
-    adapter_mode: str = "simulated"
+    adapter_mode: str = "real"          # "real" = live network (docs/LIVE_ARCHITECTURE.md); "simulated" = POC/tests
     adapter_overrides: str = ""
     database_url: str = "sqlite:///./otprobe.db"
     rules_dir: str = field(default_factory=_default_rules_dir)
@@ -33,6 +33,17 @@ class Settings:
     telemetry_time_scale: float = 1.0   # scales telemetry staleness windows (tests use < 1)
     telemetry_retention: int = 10_000
     run_migrations: bool = True
+    # Live network (docs/SAFETY_AND_SCOPE.md)
+    safe_mode: bool = True              # initial value; admins change it at runtime (safety_state)
+    scan_max_pps: float = 50.0          # global ceiling for active discovery, packets per second
+    vault_key_file: str = ""            # file holding the vault key; generated next to the DB if absent
+    admin_password: str = ""            # first-start passwords for the seeded accounts (generated if empty)
+    operator_password: str = ""
+    approver_password: str = ""
+
+    @property
+    def live(self) -> bool:
+        return self.adapter_mode == "real"
 
     @classmethod
     def from_env(cls, **overrides) -> "Settings":
@@ -46,7 +57,7 @@ class Settings:
             telemetry_time_scale=float(env.get("TELEMETRY_TIME_SCALE", 1.0)),
             enrollment_token_ttl_sec=int(env.get("ENROLLMENT_TOKEN_TTL_SEC", 900)),
             enrollment_timeout_sec=float(env.get("ENROLLMENT_TIMEOUT_SEC", 120)),
-            adapter_mode=env.get("ADAPTER_MODE", "simulated"),
+            adapter_mode=env.get("ADAPTER_MODE", "real"),
             adapter_overrides=env.get("ADAPTER_OVERRIDES", ""),
             database_url=env.get("DATABASE_URL", "sqlite:///./otprobe.db"),
             rules_dir=env.get("RULES_DIR", _default_rules_dir()),
@@ -54,6 +65,12 @@ class Settings:
             sim_service_token=env.get("SIM_SERVICE_TOKEN", "change-me-sim-token"),
             vault_key=env.get("VAULT_KEY", ""),
             agent_server_url=env.get("AGENT_SERVER_URL", "http://127.0.0.1:8000"),
+            safe_mode=env.get("SAFE_MODE", "true").lower() not in ("0", "false", "no"),
+            scan_max_pps=float(env.get("SCAN_MAX_PPS", 50)),
+            vault_key_file=env.get("VAULT_KEY_FILE", ""),
+            admin_password=env.get("OTPROBE_ADMIN_PASSWORD", ""),
+            operator_password=env.get("OTPROBE_OPERATOR_PASSWORD", ""),
+            approver_password=env.get("OTPROBE_APPROVER_PASSWORD", ""),
         )
         values.update(overrides)
         return cls(**values)

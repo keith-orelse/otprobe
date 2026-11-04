@@ -11,3 +11,8 @@ playwright-report/
 test-results/
 *.tsbuildinfo
 backend/otprobe.db*
+
+# Live-mode secrets (vault / JWT key files) must never be committed
+*.key
+*.db-shm
+*.db-wal

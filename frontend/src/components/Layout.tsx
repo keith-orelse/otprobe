@@ -11,6 +11,7 @@ import { getToken, logout, useMe } from "../auth";
 import { useServerEvents, useStreamStatus } from "../events";
 import type { NavCounts } from "../types";
 import { ErrorBoundary } from "./ErrorBoundary";
+import { EnvBanner, EnvChip, StopAllButton, useEnvironment } from "./Safety";
 import { Logo, LogoMark } from "./Logo";
 import { Toaster } from "./Toaster";
 
@@ -23,7 +24,7 @@ export const NAV: NavEntry[] = [
   { label: "Network Map", to: "/network-map", icon: Network, group: "Overview",
     description: "Purdue-level topology built only from what OTProbe has observed" },
   { label: "Discovery", to: "/discovery", icon: Radar, group: "Discover",
-    description: "ARP, ICMP and SNMP discovery of the simulated OT subnets" },
+    description: "ICMP, ARP, TCP and SNMP discovery, only inside the approved scan scope" },
   { label: "Assets", to: "/assets", icon: Server, group: "Discover",
     description: "Every discovered device, with provenance for each field",
     badge: (c) => (c.rogueAssets ? { n: c.rogueAssets, tone: "fail", title: "rogue devices" } : null) },
@@ -50,7 +51,7 @@ export const NAV: NavEntry[] = [
   { label: "Demo Controls", to: "/demo", icon: FlaskConical, group: "Administration", title: "SIMULATION CONTROLS",
     description: "Change the simulated world. OTProbe notices only through probes and agents" },
   { label: "Settings", to: "/settings", icon: Settings, group: "Administration",
-    description: "Zones, credential vault, package repository and adapters" },
+    description: "Scan scope, safety controls, credential vault and adapters" },
 ];
 
 const GROUPS = [...new Set(NAV.map((n) => n.group))];
@@ -84,17 +85,20 @@ function Shell() {
   const { pathname } = useLocation();
   const { entry, exact } = current(pathname);
   const Icon = entry?.icon;
+  const env = useEnvironment();
+  const live = env.data?.mode === "LIVE";
+  const nav = NAV.filter((n) => !(live && n.to === "/demo"));
   const initials = (me.data?.displayName ?? "?").split(" ").map((w) => w[0]).slice(0, 2).join("");
   return (
     <div className="app">
-      <div className="sim-banner" role="status">SIMULATED ENVIRONMENT - NO REAL DEVICES ARE BEING SCANNED</div>
+      <EnvBanner />
       <div className={`dashboard-layout${collapsed ? " collapsed" : ""}`}>
         <aside className="sidebar" aria-label="Main navigation">
           {collapsed ? <div className="sidebar-logo"><LogoMark /></div> : <Logo />}
           {GROUPS.map((group) => (
             <div className="nav-group" key={group}>
               <div className="nav-label">{group}</div>
-              {NAV.filter((n) => n.group === group).map((n) => {
+              {nav.filter((n) => n.group === group).map((n) => {
                 const badge = counts.data && n.badge ? n.badge(counts.data) : null;
                 return (
                   <NavLink key={n.to} to={n.to} end={n.to === "/"} title={collapsed ? n.label : undefined}
@@ -106,7 +110,9 @@ function Shell() {
               })}
             </div>
           ))}
-          <div className="sidebar-foot"><b>POC</b> · simulated OT network<br />No real devices are contacted.</div>
+          <div className="sidebar-foot">{live
+            ? <><b>LIVE</b> · real network<br />Only the approved scan scope is contacted.</>
+            : <><b>POC</b> · simulated OT network<br />No real devices are contacted.</>}</div>
         </aside>
         <div className="main-content">
           <header className="top-bar">
@@ -122,7 +128,8 @@ function Shell() {
                   <span className="spinner" />{counts.data.runningWorkflows} running</span>)}
               <span className={`live-chip live-${stream}`} title="Server-Sent Events connection">
                 <span className="live-dot" />{stream === "live" ? "Live" : stream === "connecting" ? "Connecting" : "Reconnecting"}</span>
-              <span className="env-chip">SIMULATED</span>
+              <StopAllButton role={me.data?.role} />
+              <EnvChip />
               {me.data && (
                 <div className="user-profile">
                   <span className="avatar">{initials}</span>

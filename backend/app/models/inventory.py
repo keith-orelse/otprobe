@@ -92,6 +92,7 @@ class DiscoveryJob(Base):
     targets: Mapped[list[str]] = mapped_column(JSON)
     methods: Mapped[list[str]] = mapped_column(JSON)
     safe_mode: Mapped[bool] = mapped_column(Boolean, default=False)
+    snmp_profile: Mapped[str | None] = mapped_column(String(64))   # vault profile for the SNMP step
     status: Mapped[str] = mapped_column(String(16), index=True)
     progress: Mapped[int] = mapped_column(Integer, default=0)
     phase: Mapped[str | None] = mapped_column(String(32))
