@@ -303,3 +303,7 @@ class SimulationControl(abc.ABC):
 
     @abc.abstractmethod
     def clear_fault(self, device_id: str, fault: str) -> None: ...
+
+    @abc.abstractmethod
+    def apply_config(self, device_id: str, control: str, value: str) -> str:
+        """Change host configuration; returns a human-readable description of the effect."""

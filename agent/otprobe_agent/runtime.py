@@ -17,6 +17,8 @@ from datetime import datetime, timezone
 
 import httpx
 
+from otprobe_agent.collectors import collect
+
 log = logging.getLogger("otprobe.agent")
 
 
@@ -123,9 +125,26 @@ class Agent:
                                           timeout=self.task_wait + 10)
                 self._check(r)
                 for task in r.json() if r.status_code == 200 else []:
-                    log.info("[%s] received task %s (handled in Phase 4)", self.device_id, task.get("taskId"))
+                    await self.handle(task)
             except httpx.TransportError:
                 await asyncio.sleep(self.interval)
+
+
+    async def handle(self, task: dict) -> None:
+        log.info("[%s] task %s %s", self.device_id, task["taskId"][:8], task["kind"])
+        if task["kind"] != "RUN_ASSESSMENT":
+            return
+        r = await self.client.get(f"{self.cfg.api_url}/sim/v1/hosts/{self.device_id}/os-state", headers=self.sim)
+        r.raise_for_status()
+        host = r.json()
+        if "assessment_timeout" in host["faults"]:
+            log.warning("[%s] assessment hangs (simulated): evidence never uploaded", self.device_id)
+            return
+        evidence = collect(host["state"], task["payload"]["collectors"])
+        r = await self.client.post(f"{self.cfg.api_url}/api/v1/agents/{self.agent_id}/tasks/{task['taskId']}/evidence",
+                                   json=evidence, headers={**self.auth, "X-Correlation-ID": task["correlationId"]})
+        self._check(r)
+        log.info("[%s] evidence uploaded: %s", self.device_id, r.json() if r.status_code == 202 else r.text[:200])
 
 
 class Supervisor:

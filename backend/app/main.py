@@ -26,6 +26,7 @@ from app.core.pacing import Pacer
 from app.core.security import StreamTickets
 from app.rules.book import RuleBook
 from app.services.agents import run_watchdog
+from app.services.assessments import sync_policies
 from app.services.bootstrap import seed_config, seed_trust
 from app.sim.broker import Broker
 from app.sim.latency import SimLatency
@@ -62,6 +63,8 @@ def build_context(settings: Settings, plugins: Iterable[AdapterPlugin] = ()) -> 
                      extras={"world": world, "broker": broker})
     for plugin in plugins:
         plugin(registry, ctx)
+    with db.session() as s:
+        sync_policies(s, ctx.rules)
     registry.validate()   # fails fast, e.g. ADAPTER_MODE=real with no real adapters registered
     interrupted = recover_interrupted(db)
     if interrupted:

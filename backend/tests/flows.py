@@ -38,3 +38,28 @@ async def prepared(h: Harness, ip: str = "192.168.20.13") -> None:
     await h.login("operator")
     await h.discover(["192.168.20.0/24"])
     await h.probe(ip)
+
+
+async def deployed_agent(h: Harness, ip: str = "192.168.20.13") -> tuple[str, str]:
+    """Discover, probe, request, approve, precheck, deploy; wait for ONLINE. Returns (asset_id, agent_id)."""
+    await prepared(h, ip)
+    dep = await request_deployment(h, ip)
+    await approve(h, dep)
+    await precheck(h, dep["id"])
+    done = await deploy(h, dep["id"])
+    assert done["status"] == "COMPLETED", (done["failureCode"], done["failureDetail"])
+    await h.wait_for(f"/agents/{done['agentId']}", lambda a: a["status"] == "ONLINE")
+    await h.login("operator")
+    return dep["assetId"], done["agentId"]
+
+
+async def assess(h: Harness, asset_id: str, until=("EVALUATED", "TIMED_OUT", "FAILED"), timeout: float = 30) -> dict:
+    r = await h.post(f"/assets/{asset_id}/assessments", expect=202)
+    return await h.wait_for(f"/assessments/{r.json()['id']}", lambda d: d["status"] in until, timeout=timeout)
+
+
+async def set_config(h: Harness, device: str, control: str, value: str) -> None:
+    user = h.client.headers.get("Authorization")
+    await h.login("admin")
+    await h.post(f"/demo/devices/{device}/config", {"control": control, "value": value}, expect=200)
+    h.client.headers["Authorization"] = user

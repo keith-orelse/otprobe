@@ -1,11 +1,13 @@
-from fastapi import APIRouter, Depends, Query
+from typing import Any
+
+from fastapi import APIRouter, Body, Depends, Query
 from fastapi.responses import Response
 
 from app import schemas
 from app.api.deps import CursorQ, LimitQ, any_user, current_agent, get_ctx
 from app.context import AppContext
 from app.core.principal import CurrentAgent, CurrentUser
-from app.services import agents
+from app.services import agents, assessments
 
 router = APIRouter(tags=["agents"])
 
@@ -50,4 +52,11 @@ async def heartbeat(hb: schemas.HeartbeatIn, agent: CurrentAgent = Depends(curre
 @router.get("/agents/{agent_id}/tasks", tags=["agent-protocol"], summary="Long-poll for tasks")
 async def tasks(wait_sec: int = Query(20, alias="waitSec", ge=0, le=30), agent: CurrentAgent = Depends(current_agent),
                 ctx: AppContext = Depends(get_ctx)) -> list[dict]:
-    return await agents.poll_tasks(ctx, agent, wait_sec)
+    return await assessments.poll_tasks(ctx, agent, wait_sec)
+
+
+@router.post("/agents/{agent_id}/tasks/{task_id}/evidence", status_code=202, tags=["agent-protocol"],
+             summary="Upload the evidence document for a task; evaluation runs server-side (docs/RULES.md §4)")
+async def evidence(task_id: str, body: dict[str, Any] = Body(...), agent: CurrentAgent = Depends(current_agent),
+                   ctx: AppContext = Depends(get_ctx)) -> dict[str, Any]:
+    return assessments.submit_evidence(ctx, agent, task_id, body)

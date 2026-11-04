@@ -12,8 +12,8 @@
 |---|---|---|
 | 1 | Design documents, contracts, rules schema, project skeleton | Done |
 | 2 | Simulator, seed, discovery (SSE), assets, agentless probing, classification, topology | Done (approved) |
-| 3 | Auth/roles, approvals, vault, packages, precheck, deployment, enrollment, agent runtime, heartbeat | **Done, awaiting review** |
-| 4 | Assessments, rule engine, scoring, findings lifecycle, drift, comparison screen | — |
+| 3 | Auth/roles, approvals, vault, packages, precheck, deployment, enrollment, agent runtime, heartbeat | Done (approved) |
+| 4 | Assessments, rule engine, scoring, findings lifecycle, drift, comparison screen | **Done, awaiting review** |
 | 5 | Demo controls, failure scenarios, rollback, MQTT telemetry, UI polish, tests, demo script | — |
 
 ## Quick start
@@ -45,7 +45,7 @@ arrives in Phase 5.
 ### Tests
 
 ```bash
-cd backend && .venv/bin/pytest            # unit, adapter contract, acceptance (A, B, C, D, G, J-partial, K)
+cd backend && .venv/bin/pytest            # unit, adapter contract, acceptance (A–G, J-partial, K)
 .venv/bin/ruff check app tests && .venv/bin/lint-imports   # lint + layering contracts
 ```
 
@@ -94,6 +94,37 @@ cd backend && .venv/bin/pytest            # unit, adapter contract, acceptance (
 - **SIMULATION CONTROLS** (admin, partial): device faults for testing this phase: `heartbeat_blocked`,
   `agent_crashed`, WinRM failures, `package_checksum_mismatch`, `install_failure`, `enrollment_failure` and others.
 
+## What works now (Phase 4)
+
+- **Deep assessment**: RUN DEEP ASSESSMENT (asset page) queues a `RUN_ASSESSMENT` task. The agent picks it up over
+  its long-poll, runs local collectors against its own host and uploads one evidence document. The **server**
+  evaluates the rules; the agent only collects.
+- **Rules are data** (`rules/windows_engineering_baseline.yaml`, validated against `rules/schema.json`). Evaluation
+  order is missing evidence → UNKNOWN, then type check, then condition. Each loaded policy version is stored and
+  audited (`POLICY_LOADED`).
+- **Score**: a weighted pass rate (CRITICAL 10, HIGH 6, MEDIUM 3, LOW 1; WARNING counts half), with UNKNOWN excluded
+  and shown separately. eng-ws-01's first run gives 75%: 7 pass, 2 fail, 1 warning, 1 unknown.
+- **Findings**: one per asset + rule. Each records observed, expected, source, severity, first and last seen. They
+  auto-resolve when the check passes, reopen on regression, and accept-risk is admin-only with a reason and optional
+  expiry. Sources are DEEP_AGENT, AGENTLESS (rules evaluated after every probe, e.g. eng-ws-02's unsupported OS) and
+  DISCOVERY (rogue devices).
+- **Drift**: each run is compared with the previous run of the same policy and source. PASS → FAIL/WARNING creates a
+  `CONFIGURATION_DRIFT_DETECTED` event linked to the finding. Every evidence change is listed as a configuration
+  change.
+- **Agentless vs Deep Agent** screen per asset, computed from what each stage actually collected. For example, the
+  agent sees `RemoteTool Demo`, which the agentless probe cannot.
+- **Continuous monitoring**: scheduled assessments every `ASSESSMENT_INTERVAL_SEC` (default 300). The dashboard
+  shows last heartbeat, last and next assessment, compliance, open findings, drift and configuration changes.
+  Assessments time out after `ASSESSMENT_TIMEOUT_SEC` (default 120).
+- **Configuration controls** (Demo Controls, admin): firewall, antivirus, unauthorized software and remove-patch, to
+  create drift.
+
+## How to test acceptance criteria E and F
+
+- **Automated:** `cd backend && .venv/bin/pytest tests/acceptance/test_e_assessment.py tests/acceptance/test_f_drift.py -v`
+- **Scripted (real API):** `API=http://127.0.0.1:8000 ./scripts/try_e_f.sh` (deploys an agent first if needed)
+- **By hand in the console:** [docs/TESTING_E_F.md](docs/TESTING_E_F.md)
+
 ## How to test acceptance criteria D and G
 
 **Automated** (the agent runtime is spawned as a real subprocess; the API is served over loopback HTTP):
@@ -114,11 +145,9 @@ API=http://127.0.0.1:8000 ./scripts/try_d_g.sh
 
 | Gap | Phase |
 |---|---|
-| Agents poll for tasks, but no tasks exist yet. Deep assessments, the rule engine and findings arrive then | 4 |
-| Rogue devices raise an audit event and an asset flag, but not yet the `NET-ROGUE-001` finding | 4 |
 | Remove agent / rollback, the "restart agent service" action, and the full failure matrix with UI messages | 5 |
-| Full Demo Controls (configuration drift, telemetry, rogue injection, Reset POC) | 5 |
-| The Assessments, Findings and MQTT Telemetry screens are placeholders | 4–5 |
+| Full Demo Controls UI (telemetry, rogue injection, PLC offline, Reset POC) | 5 |
+| MQTT telemetry, telemetry rules/findings, and the MQTT Telemetry screen | 5 |
 
 ## Repository layout
 
@@ -206,3 +235,15 @@ Phase 2 went ahead with these defaults.
 | N10 | Approval reason | A reason is required to reject, and to approve a deployment to a CRITICAL asset |
 | N11 | Who runs precheck and deploy | The requester (operator) or an admin. Approvers only decide |
 | N12 | Bug fixed | List filters sent in camelCase (`entityId`, `correlationId`, `assetId`) were silently ignored. They now work, with a regression test |
+
+## Phase 4 notes for review
+
+| # | Topic | What was done |
+|---|---|---|
+| N13 | WIN-SW-001 is deep-agent only | Implemented as proposed in N3 (Phase 2). Agentless WMI cannot see per-user installs, so an agentless PASS would be false |
+| N14 | Drift baseline | Drift compares with the previous run of the **same source** (deep with deep, agentless with agentless). Comparing across sources would create false drift, because agentless evidence is partial. `docs/RULES.md` is updated |
+| N15 | Observed value for list rules | For `not intersects` rules, the finding records only the offending items (`["RemoteTool Demo"]`), not the whole software list |
+| N16 | Rogue finding | `NET-ROGUE-001` (source DISCOVERY) is created on rediscovery. An admin authorizes the device via `POST /assets/{id}/authorize`, which resolves the finding |
+| N17 | Compliance on the dashboard | The average is taken over each asset's latest evaluated run (deep or agentless). The asset page names the source of its score |
+| N18 | Score precision | One decimal place (75.0, 60.7); the docs' worked example rounds to 75 |
+| N19 | Brought forward from Phase 5 | Configuration controls (firewall, antivirus, unauthorized software, remove patch) and the `assessment_timeout` fault, because F needs them |

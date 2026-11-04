@@ -60,6 +60,14 @@ async def local_state(device_id: str, request: Request) -> dict[str, Any]:
             "identity": dict(d.state.get("files", {}).get("agent_identity") or {})}
 
 
+@router.get("/hosts/{device_id}/os-state", dependencies=[Depends(sim_auth)])
+async def os_state(device_id: str, request: Request) -> dict[str, Any]:
+    """What a local agent can read from its own OS (registry, WMI, netsh, secedit, ...)."""
+    d = _host(request, device_id)
+    state = {k: v for k, v in d.state.items() if k not in ("accounts", "files", "snmp", "winrm", "ssh")}
+    return {"deviceId": d.device_id, "online": d.online, "faults": sorted(d.faults), "state": state}
+
+
 class AgentIdentity(BaseModel):
     agentId: str
     credential: str

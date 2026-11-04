@@ -6,7 +6,7 @@ and the UI never hardcodes a status.
 
 | File | Kind | Evaluated on |
 |---|---|---|
-| `windows_engineering_baseline.yaml` | compliance | deep assessment evidence (agent); agentless probe data for rules with `AGENTLESS` in `sources` |
+| `windows_engineering_baseline.yaml` | compliance | deep assessment evidence (agent); agentless probe data for rules with `AGENTLESS` in `sources` (WIN-FW-001, WIN-AV-001, WIN-OS-001) |
 | `telemetry.yaml` | telemetry | every MQTT message on `topic`, plus a staleness timer (`stale_after_sec`) |
 | `network.yaml` | event | discovery events (rogue device) |
 | `classification.yaml` | classification signals | after each probe |
@@ -130,7 +130,8 @@ Findings created: WIN-PATCH-001 (HIGH), WIN-SW-001 (MEDIUM, WARNING), WIN-ADM-00
 - Each FAIL/WARNING result upserts the finding (asset_id, rule_id). Lifecycle:
   [STATE_MACHINES.md §5](STATE_MACHINES.md#5-finding). `source` comes from the evaluating stage.
 - **Drift:** after evaluation, each result is compared with the same rule's result in `previous_run_id`. The
-  previous run is the asset's last `EVALUATED` run of the same policy, whatever its source. A PASS → FAIL or
+  previous run is the asset's last `EVALUATED` run of the same policy **and the same source** (deep agent or
+  agentless), so partial agentless evidence never produces false drift against a deep run. A PASS → FAIL or
   PASS → WARNING change creates a `drift_events` row linked to the finding, an audit event
   `CONFIGURATION_DRIFT_DETECTED` and an SSE `drift.detected` event.
 - **Configuration changes:** the evidence documents of the two runs are diffed path by path into

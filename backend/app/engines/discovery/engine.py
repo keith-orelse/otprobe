@@ -14,6 +14,7 @@ from app.core import audit, events
 from app.core.audit import system
 from app.core.clock import utcnow
 from app.core.correlation import get_correlation_id
+from app.engines.assessment.findings import open_event_finding
 from app.engines.inventory import merge_observation, refresh_asset, upsert_fields
 from app.models import Asset, DiscoveryJob, DiscoveryObservation, Zone
 from app.workflow.machine import DISCOVERY
@@ -175,6 +176,10 @@ class DiscoveryEngine:
     def _on_arp(self, job_id: str, host: DiscoveredHost, baseline: set[str], seen: dict[str, set[str]]) -> None:
         with self.ctx.db.session() as s:
             asset, created, rogue = merge_observation(s, host.ip, host.mac, ACTOR, baseline)
+            if rogue:
+                rule = next(r for r in self.ctx.rules.policies["network-hygiene"]["rules"]
+                            if r["id"] == "NET-ROGUE-001")
+                open_event_finding(s, asset.id, rule, {"ip": host.ip, "mac": host.mac, "authorized": False}, ACTOR)
             upsert_fields(s, asset.id, host.data, "ARP", "DISCOVERY", "DISCOVERY", job_id)
             s.add(DiscoveryObservation(job_id=job_id, asset_id=asset.id, ip=host.ip, mac=host.mac, method="ARP",
                                        responded=True, result=host.data))

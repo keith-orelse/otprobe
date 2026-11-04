@@ -5,6 +5,9 @@ import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { Layout, NAV } from "./components/Layout";
 import { AgentDetail, Agents } from "./pages/Agents";
 import { Approvals } from "./pages/Approvals";
+import { AssessmentDetail, Assessments } from "./pages/Assessments";
+import { Compare } from "./pages/Compare";
+import { FindingDetail, Findings } from "./pages/Findings";
 import { AssetDetail } from "./pages/AssetDetail";
 import { Assets } from "./pages/Assets";
 import { AuditLogs } from "./pages/AuditLogs";
@@ -42,6 +45,11 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             <Route path="agents" element={<Agents />} />
             <Route path="agents/:id" element={<AgentDetail />} />
             <Route path="demo" element={<DemoControls />} />
+            <Route path="assessments" element={<Assessments />} />
+            <Route path="assessments/:id" element={<AssessmentDetail />} />
+            <Route path="findings" element={<Findings />} />
+            <Route path="findings/:id" element={<FindingDetail />} />
+            <Route path="assets/:id/compare" element={<Compare />} />
             {NAV.filter((n) => n.phase).map((n) => <Route key={n.to} path={n.to.slice(1)} element={<Pending />} />)}
           </Route>
         </Routes>

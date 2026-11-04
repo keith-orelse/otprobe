@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import asyncio
+from dataclasses import dataclass, field
 from typing import Any
 
 from app.adapters.base import CredentialVault, PackageTransfer, SimulationControl
@@ -30,3 +31,7 @@ class AppContext:
     sim_control: SimulationControl | None
     tickets: StreamTickets
     extras: dict[str, Any]
+    task_signals: dict[str, asyncio.Event] = field(default_factory=dict)
+
+    def signal(self, agent_id: str) -> asyncio.Event:
+        return self.task_signals.setdefault(agent_id, asyncio.Event())

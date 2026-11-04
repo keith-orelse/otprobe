@@ -26,6 +26,12 @@ EXPECTED = {
               ("STALE", "ONLINE"), ("OFFLINE", "ONLINE"), ("ONLINE", "REMOVING"), ("STALE", "REMOVING"),
               ("OFFLINE", "REMOVING"), ("ERROR", "REMOVING"), ("REMOVING", "REMOVED"), ("REMOVING", "ERROR")},
     "approval": {("PENDING", "APPROVED"), ("PENDING", "REJECTED"), ("PENDING", "EXPIRED")},
+    "finding": {("OPEN", "RESOLVED"), ("REOPENED", "RESOLVED"), ("RESOLVED", "REOPENED"), ("OPEN", "ACCEPTED_RISK"),
+                ("REOPENED", "ACCEPTED_RISK"), ("ACCEPTED_RISK", "RESOLVED"), ("ACCEPTED_RISK", "OPEN")},
+    "assessment": {("QUEUED", "RUNNING"), ("QUEUED", "CANCELLED"), ("QUEUED", "EVALUATED"), ("RUNNING", "EVALUATED"),
+                   ("RUNNING", "FAILED"), ("RUNNING", "TIMED_OUT"), ("RUNNING", "CANCELLED")},
+    "task": {("QUEUED", "DISPATCHED"), ("QUEUED", "CANCELLED"), ("DISPATCHED", "COMPLETED"), ("DISPATCHED", "FAILED"),
+             ("DISPATCHED", "TIMED_OUT"), ("DISPATCHED", "CANCELLED")},
     "removal": {("REQUESTED", "APPROVED"), ("REQUESTED", "REJECTED"), ("APPROVED", "RUNNING"), ("RUNNING", "COMPLETED"),
                 ("RUNNING", "FAILED"), ("FAILED", "RUNNING")},
 }

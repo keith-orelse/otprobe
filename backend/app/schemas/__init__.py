@@ -158,6 +158,7 @@ class AssetDetail(AssetSummary):
     last_probe_id: str | None = None
     maintenance_window_required: bool = False
     current_agent_id: str | None = None
+    compliance: "Compliance | None" = None
     notes: list[str] = []
 
 
@@ -251,6 +252,12 @@ class DashboardSummary(Camel):
     last_discovery: DiscoveryJob | None
     recent_events: list[AuditEvent]
     adapters: list[dict[str, Any]]
+    open_findings: dict[str, int] = {}
+    compliance_avg: float | None = None
+    unknown_total: int = 0
+    monitoring: list["MonitoringRow"] = []
+    recent_drift: list["DriftEvent"] = []
+    recent_changes: list[dict[str, Any]] = []
 
 
 # ---------------------------------------------------------------- Phase 3: auth, approvals, deployment, agents
@@ -426,8 +433,204 @@ class DemoDevice(Camel):
     online: bool
     agent_installed: bool
     faults: list[str]
+    config: dict[str, str] = {}
 
 
 class DemoState(Camel):
     devices: list[DemoDevice]
     available_faults: dict[str, str]
+    config_controls: dict[str, list[str]] = {}
+
+
+# ---------------------------------------------------------------- Phase 4: assessments, findings, drift, comparison
+class RuleInfo(Camel):
+    id: str
+    title: str
+    severity: str
+    sources: list[str]
+    evidence: str
+    condition: str
+    on_fail: str
+    references: list[str]
+
+
+class PolicyInfo(Camel):
+    key: str
+    version: str
+    name: str
+    kind: str
+    digest: str
+    loaded_at: datetime
+    rules: list[RuleInfo]
+
+
+class AssessmentCreate(Camel):
+    policy_id: str | None = Field(None, examples=["windows-engineering-baseline"])
+
+
+class RuleResult(Camel):
+    seq: int
+    rule_id: str
+    rule_version: str
+    title: str
+    status: str
+    severity: str
+    evidence_path: str
+    observed: Any = None
+    expected: str
+    message: str | None
+    previous_status: str | None
+    references: list[str] = []
+
+
+class DriftEvent(Camel):
+    id: str
+    asset_id: str
+    asset_name: str | None = None
+    run_id: str
+    previous_run_id: str
+    rule_id: str
+    from_status: str
+    to_status: str
+    evidence_path: str
+    before: Any = None
+    after: Any = None
+    finding_id: str | None
+    detected_at: datetime
+
+
+class EvidenceChange(Camel):
+    path: str
+    before: Any = None
+    after: Any = None
+    detected_at: datetime
+
+
+class AssessmentRun(Camel):
+    id: str
+    asset_id: str
+    asset_name: str | None = None
+    agent_id: str | None
+    policy_key: str
+    policy_version: str
+    source: str
+    trigger: str
+    status: str
+    requested_by: str
+    score: float | None
+    counts: dict[str, int]
+    previous_run_id: str | None
+    error: str | None
+    correlation_id: str
+    created_at: datetime
+    started_at: datetime | None
+    finished_at: datetime | None
+    evidence: dict[str, Any] | None = None
+    results: list[RuleResult] = []
+    drift_events: list[DriftEvent] = []
+    evidence_changes: list[EvidenceChange] = []
+
+
+class Compliance(Camel):
+    score: float | None
+    counts: dict[str, int]
+    source: str | None
+    last_run_id: str | None
+    last_assessment_at: datetime | None
+    last_deep_status: str | None
+    next_assessment_at: datetime | None
+    open_findings: int
+    run_action: ActionState
+
+
+class FindingEventOut(Camel):
+    from_status: str | None
+    to_status: str
+    run_id: str | None
+    actor: str
+    reason: str | None
+    at: datetime
+
+
+class Finding(Camel):
+    id: str
+    asset_id: str
+    asset_name: str | None = None
+    asset_ip: str | None = None
+    rule_id: str
+    title: str
+    severity: str
+    status: str
+    result_status: str
+    source: str
+    observed: Any = None
+    expected: str
+    references: list[str]
+    remediation: str | None
+    first_seen: datetime
+    last_seen: datetime
+    resolved_at: datetime | None
+    reopen_count: int
+    accepted_by: str | None
+    accepted_reason: str | None
+    accepted_at: datetime | None
+    accepted_until: datetime | None
+    last_run_id: str | None
+    actions: dict[str, ActionState] = {}
+    events: list[FindingEventOut] = []
+    drift_events: list[DriftEvent] = []
+
+
+class AcceptRisk(Camel):
+    reason: str = Field(min_length=5, max_length=500)
+    expires_at: datetime | None = None
+
+
+class RevokeAcceptance(Camel):
+    reason: str | None = None
+
+
+class AuthorizeAsset(Camel):
+    reason: str = Field(min_length=3, max_length=300)
+
+
+class CompareCell(Camel):
+    level: str
+    value: Any = None
+    source: str | None = None
+    detail: str | None = None
+
+
+class CompareRow(Camel):
+    capability: str
+    agentless: CompareCell
+    deep: CompareCell
+
+
+class Comparison(Camel):
+    asset_id: str
+    asset_name: str
+    has_deep_evidence: bool
+    rows: list[CompareRow]
+
+
+class DemoConfig(Camel):
+    control: Literal["firewall", "antivirus", "unauthorized_software", "remove_patch"]
+    value: str = Field(examples=["disabled"])
+
+
+class MonitoringRow(Camel):
+    asset_id: str
+    asset_name: str
+    agent_id: str
+    agent_status: str
+    seconds_since_heartbeat: int | None
+    last_assessment_at: datetime | None
+    next_assessment_at: datetime | None
+    score: float | None
+    unknown: int
+    open_findings: int
+
+
+AssetDetail.model_rebuild()
+DashboardSummary.model_rebuild()

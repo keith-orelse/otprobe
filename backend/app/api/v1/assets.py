@@ -19,7 +19,7 @@ async def list_assets(limit: int = LimitQ, cursor: str | None = CursorQ, q: str 
 @router.get("/{asset_id}", response_model=schemas.AssetDetail)
 async def get_asset(asset_id: str, ctx: AppContext = Depends(get_ctx)):
     with ctx.db.session() as s:
-        return assets.get_asset(s, ctx.registry, asset_id)
+        return assets.get_asset(ctx, s, ctx.registry, asset_id)
 
 
 @router.get("/{asset_id}/fields", response_model=list[schemas.FieldValue],

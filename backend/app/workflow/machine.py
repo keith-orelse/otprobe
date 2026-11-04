@@ -131,4 +131,43 @@ REMOVAL = StateMachine(
     },
 )
 
-MACHINES = {m.entity_kind: m for m in (DISCOVERY, PROBE, DEPLOYMENT, AGENT, APPROVAL, REMOVAL)}
+FINDING = StateMachine(
+    "Finding", "finding", "OPEN", "FINDING_OPENED",
+    {
+        ("OPEN", "RESOLVED"): "FINDING_RESOLVED",
+        ("REOPENED", "RESOLVED"): "FINDING_RESOLVED",
+        ("RESOLVED", "REOPENED"): "FINDING_REOPENED",
+        ("OPEN", "ACCEPTED_RISK"): "FINDING_RISK_ACCEPTED",
+        ("REOPENED", "ACCEPTED_RISK"): "FINDING_RISK_ACCEPTED",
+        ("ACCEPTED_RISK", "RESOLVED"): "FINDING_RESOLVED",
+        ("ACCEPTED_RISK", "OPEN"): "FINDING_RISK_REVOKED",
+    },
+)
+
+ASSESSMENT = StateMachine(
+    "Assessment run", "assessment", "QUEUED", "ASSESSMENT_REQUESTED",
+    {
+        ("QUEUED", "RUNNING"): "ASSESSMENT_STARTED",
+        ("QUEUED", "CANCELLED"): "ASSESSMENT_CANCELLED",
+        ("QUEUED", "EVALUATED"): "ASSESSMENT_EVALUATED",   # agentless runs are evaluated immediately
+        ("RUNNING", "EVALUATED"): "ASSESSMENT_EVALUATED",
+        ("RUNNING", "FAILED"): "ASSESSMENT_FAILED",
+        ("RUNNING", "TIMED_OUT"): "ASSESSMENT_TIMED_OUT",
+        ("RUNNING", "CANCELLED"): "ASSESSMENT_CANCELLED",
+    },
+)
+
+TASK = StateMachine(
+    "Agent task", "task", "QUEUED", "TASK_QUEUED",
+    {
+        ("QUEUED", "DISPATCHED"): "TASK_DISPATCHED",
+        ("QUEUED", "CANCELLED"): "TASK_CANCELLED",
+        ("DISPATCHED", "COMPLETED"): "TASK_COMPLETED",
+        ("DISPATCHED", "FAILED"): "TASK_FAILED",
+        ("DISPATCHED", "TIMED_OUT"): "TASK_TIMED_OUT",
+        ("DISPATCHED", "CANCELLED"): "TASK_CANCELLED",
+    },
+)
+
+MACHINES = {m.entity_kind: m for m in (DISCOVERY, PROBE, DEPLOYMENT, AGENT, APPROVAL, REMOVAL, FINDING, ASSESSMENT,
+                                       TASK)}

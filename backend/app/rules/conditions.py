@@ -185,11 +185,11 @@ def parse(text: str) -> Condition:
     return cond
 
 
-def _resolve_operand(o: Operand, params: Mapping[str, Any]) -> Any:
+def resolve_operand(o: Operand, params: Mapping[str, Any]) -> Any:
     if o.kind == "literal":
         return o.value
     if o.kind == "list":
-        return [_resolve_operand(i, params) for i in o.value]
+        return [resolve_operand(i, params) for i in o.value]
     if o.value not in params:
         raise ConditionSyntaxError(f"undefined parameter ${o.value}")
     return params[o.value]
@@ -219,7 +219,7 @@ def _clause(c: Clause, value: Any, params: Mapping[str, Any]) -> bool:
         return not empty if c.negate else empty
     if value is MISSING:
         raise ConditionTypeError("value is missing")
-    operand = _resolve_operand(c.operand, params) if c.operand else None
+    operand = resolve_operand(c.operand, params) if c.operand else None
     if c.op in CMP_OPS:
         if c.count:
             if not isinstance(value, list):

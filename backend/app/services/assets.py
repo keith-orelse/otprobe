@@ -10,6 +10,7 @@ from app.core.errors import ProblemError, not_found
 from app.core.fields import GROUP_OF, GROUPS
 from app.engines.inventory import effective_fields
 from app.models import Asset, AssetField, AssetRelationship, ProbeRun, Zone
+from app.services.assessments import compliance
 from app.services.common import paginate
 from app.services.deployments import deploy_action_for_asset
 
@@ -53,7 +54,7 @@ def list_assets(session: Session, limit: int, cursor: str | None, q: str | None,
 
 
 
-def get_asset(session: Session, registry: AdapterRegistry, asset_id: str) -> schemas.AssetDetail:
+def get_asset(ctx, session: Session, registry: AdapterRegistry, asset_id: str) -> schemas.AssetDetail:
     asset = session.get(Asset, asset_id)
     if asset is None:
         raise not_found("Asset", asset_id)
@@ -89,6 +90,7 @@ def get_asset(session: Session, registry: AdapterRegistry, asset_id: str) -> sch
     out.last_probe_id = last
     out.maintenance_window_required = asset.eligibility == "REVIEW_REQUIRED"
     out.current_agent_id = asset.current_agent_id
+    out.compliance = compliance(ctx, session, asset)
     reach = eff.get("reachability.icmp")
     if reach is not None and reach.value in ("BLOCKED", "TIMEOUT"):
         out.notes.append("No ICMP reply does not mean the device is offline."

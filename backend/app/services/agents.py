@@ -98,12 +98,6 @@ def heartbeat(ctx: AppContext, agent_ref: CurrentAgent, hb: schemas.HeartbeatIn)
                                                                "at": now.isoformat()})
 
 
-async def poll_tasks(ctx: AppContext, agent_ref: CurrentAgent, wait_sec: int) -> list[dict[str, Any]]:
-    """Long-poll. Assessment tasks are introduced in Phase 4; until then the poll simply times out empty."""
-    await asyncio.sleep(min(wait_sec, TASK_POLL_WAIT_SEC))
-    return []
-
-
 # ---------------------------------------------------------------- console
 def to_schema(ctx: AppContext, session: Session, a: Agent) -> schemas.Agent:
     out = schemas.Agent.model_validate(a)
@@ -177,10 +171,14 @@ def watchdog_tick(ctx: AppContext) -> None:
 
 
 async def run_watchdog(ctx: AppContext) -> None:
+    """Background loop: heartbeat staleness, enrollment timeouts, assessment scheduling and timeouts, risk expiry."""
+    from app.services import assessments, findings
+
     period = max(0.1, min(1.0, ctx.settings.heartbeat_interval_sec / 4))
     while True:
-        try:
-            watchdog_tick(ctx)
-        except Exception:  # noqa: BLE001 - the watchdog must keep running
-            log.exception("watchdog tick failed")
+        for tick in (watchdog_tick, assessments.timeout_tick, assessments.scheduler_tick, findings.expiry_tick):
+            try:
+                tick(ctx)
+            except Exception:  # noqa: BLE001 - the loop must keep running
+                log.exception("%s failed", tick.__name__)
         await asyncio.sleep(period)

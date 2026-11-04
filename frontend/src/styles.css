@@ -63,7 +63,7 @@ h2 { font-size: 12px; font-weight: 600; margin: 0; text-transform: uppercase; le
 /* KPIs */
 .kpis { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; margin-bottom: 14px; }
 .kpi { background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--line); padding: 8px 12px; }
-.kpi span { display: block; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
+.kpi > span { display: block; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
 .kpi b { font: 600 22px var(--mono); }
 .kpi-ok { border-left-color: var(--ok); } .kpi-fail { border-left-color: var(--fail); } .kpi-warn { border-left-color: var(--warn); }
 
@@ -187,3 +187,25 @@ details.result summary { cursor: pointer; }
 .fault-on { border-color: #6b2523; color: var(--fail); margin: 0 4px 4px 0; }
 input[type="password"], input[type="datetime-local"] { background: #0b0f13; border: 1px solid var(--line); color: var(--text);
   padding: 5px 8px; font: 12px var(--sans); border-radius: 2px; }
+
+/* Phase 4 */
+.kpis-4 { grid-template-columns: repeat(4, 1fr); }
+.kpis { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+.score { font-family: var(--mono); font-weight: 600; }
+.score-ok { color: var(--ok); } .score-warn { color: var(--warn); } .score-fail { color: var(--fail); }
+.counts { display: inline-flex; gap: 8px; font: 11px var(--mono); }
+.c-pass { color: var(--ok); } .c-fail { color: var(--fail); } .c-warn { color: var(--warn); } .c-unk { color: var(--muted); }
+.compliance { display: grid; grid-template-columns: repeat(5, auto) 1fr; gap: 24px; align-items: start; margin-bottom: 10px; }
+.compliance .big { font: 600 20px var(--mono); }
+.compliance .action-with-reason { justify-self: end; }
+.drift-row { background: #2a1112 !important; }
+pre.evidence { max-height: 420px; overflow: auto; font: 11px var(--mono); background: #0b0f13; padding: 8px; border: 1px solid var(--line); }
+h3.sub { font-size: 11px; text-transform: uppercase; color: var(--muted); margin: 14px 0 6px; }
+table.compare th { width: 22%; text-align: left; vertical-align: top; padding: 6px 8px; }
+table.compare td { width: 39%; }
+.lvl { font: 600 11px var(--mono); padding: 0 6px; border: 1px solid; border-radius: 2px; }
+.lvl-strong { color: var(--ok); border-color: #2a5b34; }
+.lvl-mid { color: var(--warn); border-color: #5c4813; }
+.lvl-weak { color: var(--muted); border-color: #2b3542; }
+td.mono:first-child, td.mono a { white-space: nowrap; }
+.kpi b .score { font-size: 22px; }

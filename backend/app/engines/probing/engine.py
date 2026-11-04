@@ -12,6 +12,7 @@ from app.core import audit, events
 from app.core.audit import system
 from app.core.clock import utcnow
 from app.core.correlation import get_correlation_id
+from app.engines.assessment.runner import evaluate_agentless
 from app.engines.inventory import effective_fields, refresh_asset, upsert_fields
 from app.models import Asset, ProbeResult, ProbeRun, Zone
 from app.workflow.machine import PROBE
@@ -19,7 +20,7 @@ from app.workflow.steps import StepTracker
 
 log = logging.getLogger("otprobe.probe")
 ACTOR = system("probe-engine")
-STEPS = ["ICMP", "ARP", "WINRM", "WMI", "SNMP", "SSH", "MQTT", "COLLECT", "CLASSIFY"]
+STEPS = ["ICMP", "ARP", "WINRM", "WMI", "SNMP", "SSH", "MQTT", "COLLECT", "CLASSIFY", "EVALUATE"]
 SAFE_MODE_SKIP = "Safe mode (Level 0/1): only passive/read-only methods are used"
 WMI_GROUPS = ["os", "hardware", "firewall", "antivirus", "software", "services", "hotfixes", "network"]
 
@@ -229,6 +230,17 @@ class ProbeEngine:
                           "eligibility": a.eligibility, "probeId": probe_id})
             label = f"{a.device_type} ({cls['confidence']}%)" if cls else "Unclassified"
         tracker.ok("CLASSIFY", f"{label} · agent eligibility {a.eligibility}")
+
+        tracker.start("EVALUATE", "Evaluating compliance rules that accept agentless evidence")
+        with db.session() as s:
+            runs = evaluate_agentless(s, s.get(Asset, asset_id), probe_id, ACTOR)
+            summary = "; ".join(f"{r.policy_key}: {r.counts.get('pass', 0)} pass, {r.counts.get('fail', 0)} fail, "
+                                f"{r.counts.get('warning', 0)} warning, {r.counts.get('unknown', 0)} unknown"
+                                for r in runs)
+        if runs:
+            tracker.ok("EVALUATE", f"{summary} (source AGENTLESS)")
+        else:
+            tracker.skip("EVALUATE", "No compliance policy applies to this device")
 
         with db.session() as s:
             run = s.get(ProbeRun, probe_id)

@@ -23,6 +23,14 @@ FAULTS = {
     "install_failure": "Agent installer fails (exit 1603)",
     "enrollment_failure": "Agent presents an invalid enrollment token",
     "server_unreachable": "Host cannot reach the OTProbe server (:443)",
+    "assessment_timeout": "Agent accepts assessment tasks but never uploads evidence",
+}
+
+CONFIG_VALUES = {
+    "firewall": ("enabled", "disabled"),
+    "antivirus": ("running", "stopped"),
+    "unauthorized_software": ("install", "remove"),
+    "remove_patch": ("latest",),
 }
 
 
@@ -34,7 +42,8 @@ def _control(ctx: AppContext):
 
 def state(ctx: AppContext) -> schemas.DemoState:
     return schemas.DemoState(devices=[schemas.DemoDevice.model_validate(d) for d in _control(ctx).devices()],
-                             available_faults=FAULTS)
+                             available_faults=FAULTS,
+                             config_controls={k: list(v) for k, v in CONFIG_VALUES.items()})
 
 
 def apply_fault(ctx: AppContext, device_id: str, req: schemas.DemoFault, user: CurrentUser):
@@ -53,6 +62,27 @@ def apply_fault(ctx: AppContext, device_id: str, req: schemas.DemoFault, user: C
     def action(session):
         audit.record(session, user.actor, "DEMO_CONTROL_APPLIED", "sim_device", device_id,
                      {"control": req.fault, "enabled": req.enabled, "params": req.params})
+        dev = next(d for d in control.devices() if d["deviceId"] == device_id)
+        return schemas.DemoDevice.model_validate(dev).dump(), None
+
+    return action
+
+
+def apply_config(ctx: AppContext, device_id: str, req: schemas.DemoConfig, user: CurrentUser):
+    if req.value not in CONFIG_VALUES[req.control]:
+        raise ProblemError(422, "invalid-value", "Invalid value for control",
+                           f"{req.control} accepts {', '.join(CONFIG_VALUES[req.control])}")
+    control = _control(ctx)
+    try:
+        detail = control.apply_config(device_id, req.control, req.value)
+    except KeyError:
+        raise ProblemError(404, "not-found", "Simulated device not found", device_id) from None
+    except ValueError as exc:
+        raise ProblemError(409, "not-applicable", "Control not applicable to this device", str(exc)) from None
+
+    def action(session):
+        audit.record(session, user.actor, "DEMO_CONTROL_APPLIED", "sim_device", device_id,
+                     {"control": req.control, "value": req.value, "effect": detail})
         dev = next(d for d in control.devices() if d["deviceId"] == device_id)
         return schemas.DemoDevice.model_validate(dev).dump(), None
 

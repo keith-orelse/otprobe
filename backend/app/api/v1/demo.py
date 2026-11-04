@@ -21,3 +21,11 @@ async def fault(device_id: str, req: schemas.DemoFault, user: CurrentUser = Depe
                 idem: Idempotency = Depends(require_idempotency), ctx: AppContext = Depends(get_ctx)):
     action = demo.apply_fault(ctx, device_id, req, user)
     return idem.execute(ctx.db, 200, action)
+
+
+@router.post("/devices/{device_id}/config", response_model=schemas.DemoDevice,
+             summary="SIMULATION CONTROLS: change host configuration (firewall, antivirus, software, patches)")
+async def config(device_id: str, req: schemas.DemoConfig, user: CurrentUser = Depends(admin_only),
+                 idem: Idempotency = Depends(require_idempotency), ctx: AppContext = Depends(get_ctx)):
+    action = demo.apply_config(ctx, device_id, req, user)
+    return idem.execute(ctx.db, 200, action)

@@ -20,4 +20,4 @@ async def health(ctx: AppContext = Depends(get_ctx)) -> dict:
 @router.get("/dashboard/summary", response_model=schemas.DashboardSummary)
 async def summary(ctx: AppContext = Depends(get_ctx), user=Depends(any_user)):
     with ctx.db.session() as s:
-        return dashboard.summary(s, ctx.registry)
+        return dashboard.summary(ctx, s, ctx.registry)

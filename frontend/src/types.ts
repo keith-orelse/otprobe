@@ -40,7 +40,7 @@ export interface Relationship { kind: string; direction: string; peerAssetId: st
 export interface AssetDetail extends AssetSummary { zone: Zone | null; classification: Classification | null;
   groups: Record<string, FieldValue[]>; relationships: Relationship[]; deployAgent: ActionState;
   agentless: ActionState; lastProbeId: string | null; maintenanceWindowRequired: boolean;
-  currentAgentId: string | null; notes: string[] }
+  currentAgentId: string | null; compliance: Compliance | null; notes: string[] }
 
 export interface ProbeResult { protocol: string; status: string; data: Record<string, any>;
   stages: { name: string; status: string; detail: string; at: string | null }[]; latencyMs: number | null;
@@ -66,7 +66,10 @@ export interface VaultProfile { name: string; protocol: string; username: string
 
 export interface DashboardSummary { assets: Record<string, number>; assetsByLevel: Record<string, number>;
   eligibility: Record<string, number>; rogue: number; lastDiscovery: DiscoveryJob | null;
-  recentEvents: AuditEvent[]; adapters: { protocol: string; implementation: string; simulated: boolean; label: string }[] }
+  recentEvents: AuditEvent[]; adapters: { protocol: string; implementation: string; simulated: boolean; label: string }[];
+  openFindings: Record<string, number>; complianceAvg: number | null; unknownTotal: number; monitoring: MonitoringRow[];
+  recentDrift: DriftEvent[]; recentChanges: { assetId: string; assetName: string | null; path: string; before: any;
+    after: any; detectedAt: string; runId: string }[] }
 
 export interface SseEvent { id: number; type: string; ts: string; correlationId: string | null;
   entity: { kind: string; id: string | null }; data: Record<string, any> }
@@ -102,5 +105,45 @@ export interface HeartbeatRecord { seq: number; receivedAt: string; agentTime: s
   payload: Record<string, any> }
 
 export interface DemoDevice { deviceId: string; ip: string; hostname: string; type: string; level: string;
-  powered: boolean; online: boolean; agentInstalled: boolean; faults: string[] }
-export interface DemoState { devices: DemoDevice[]; availableFaults: Record<string, string> }
+  powered: boolean; online: boolean; agentInstalled: boolean; faults: string[]; config: Record<string, string> }
+export interface DemoState { devices: DemoDevice[]; availableFaults: Record<string, string>;
+  configControls: Record<string, string[]> }
+
+export interface RuleResult { seq: number; ruleId: string; ruleVersion: string; title: string; status: string;
+  severity: string; evidencePath: string; observed: any; expected: string; message: string | null;
+  previousStatus: string | null; references: string[] }
+
+export interface DriftEvent { id: string; assetId: string; assetName: string | null; runId: string;
+  previousRunId: string; ruleId: string; fromStatus: string; toStatus: string; evidencePath: string; before: any;
+  after: any; findingId: string | null; detectedAt: string }
+
+export interface EvidenceChange { path: string; before: any; after: any; detectedAt: string }
+
+export interface AssessmentRun { id: string; assetId: string; assetName: string | null; agentId: string | null;
+  policyKey: string; policyVersion: string; source: string; trigger: string; status: string; requestedBy: string;
+  score: number | null; counts: Record<string, number>; previousRunId: string | null; error: string | null;
+  correlationId: string; createdAt: string; startedAt: string | null; finishedAt: string | null;
+  evidence: Record<string, any> | null; results: RuleResult[]; driftEvents: DriftEvent[];
+  evidenceChanges: EvidenceChange[] }
+
+export interface Compliance { score: number | null; counts: Record<string, number>; source: string | null;
+  lastRunId: string | null; lastAssessmentAt: string | null; lastDeepStatus: string | null;
+  nextAssessmentAt: string | null; openFindings: number; runAction: ActionState }
+
+export interface FindingEvent { fromStatus: string | null; toStatus: string; runId: string | null; actor: string;
+  reason: string | null; at: string }
+
+export interface Finding { id: string; assetId: string; assetName: string | null; assetIp: string | null;
+  ruleId: string; title: string; severity: string; status: string; resultStatus: string; source: string;
+  observed: any; expected: string; references: string[]; remediation: string | null; firstSeen: string;
+  lastSeen: string; resolvedAt: string | null; reopenCount: number; acceptedBy: string | null;
+  acceptedReason: string | null; acceptedAt: string | null; acceptedUntil: string | null; lastRunId: string | null;
+  actions: Record<string, ActionState>; events: FindingEvent[]; driftEvents: DriftEvent[] }
+
+export interface CompareCell { level: string; value: any; source: string | null; detail: string | null }
+export interface Comparison { assetId: string; assetName: string; hasDeepEvidence: boolean;
+  rows: { capability: string; agentless: CompareCell; deep: CompareCell }[] }
+
+export interface MonitoringRow { assetId: string; assetName: string; agentId: string; agentStatus: string;
+  secondsSinceHeartbeat: number | null; lastAssessmentAt: string | null; nextAssessmentAt: string | null;
+  score: number | null; unknown: number; openFindings: number }

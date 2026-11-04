@@ -3,7 +3,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { apiAction, apiGet } from "../api";
 import { ago, ErrorBox, Panel, Pill, SourceBadge, StepList, time, Value } from "../components/ui";
-import type { Agent, AssetDetail as Asset, Deployment, Package, ProbeRun } from "../types";
+import type { Agent, AssessmentRun, AssetDetail as Asset, Deployment, Finding, Package, Page, ProbeRun } from "../types";
+import { Counts, Score } from "./Assessments";
 
 export function AssetDetail() {
   const { id = "" } = useParams();
@@ -46,6 +47,7 @@ export function AssetDetail() {
       <ErrorBox error={run.error} />
       {requesting && <DeployRequest asset={a} onClose={() => setRequesting(false)} />}
       {a.currentAgentId && <AgentStrip id={a.currentAgentId} />}
+      {a.compliance && <ComplianceStrip asset={a} />}
       {a.notes.map((n) => <div key={n} className="note">{n}</div>)}
 
       <div className="grid-3">
@@ -170,5 +172,43 @@ function AgentStrip({ id }: { id: string }) {
       <span>Last heartbeat: {a.secondsSinceHeartbeat == null ? "—" : `${a.secondsSinceHeartbeat} seconds ago`}</span>
       <Link to={`/agents/${a.id}`}>agent →</Link>
     </div>
+  );
+}
+
+function ComplianceStrip({ asset }: { asset: Asset }) {
+  const qc = useQueryClient();
+  const c = asset.compliance!;
+  const findings = useQuery({ queryKey: ["findings", "asset", asset.id],
+    queryFn: () => apiGet<Page<Finding>>("/findings", { assetId: asset.id, status: "OPEN,REOPENED,ACCEPTED_RISK" }) });
+  const run = useMutation({
+    mutationFn: () => apiAction<AssessmentRun>(`/assets/${asset.id}/assessments`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["asset", asset.id] }),
+  });
+  return (
+    <Panel title="Compliance · Windows Engineering Baseline" actions={<>
+      <Link to={`/assets/${asset.id}/compare`}>Agentless vs Deep Agent →</Link>{" "}
+      {c.lastRunId && <Link to={`/assessments/${c.lastRunId}`}>last run →</Link>}</>}>
+      <div className="compliance">
+        <div><span className="muted small">Score</span><div className="big"><Score score={c.score} /></div>
+          {c.source && <span className="muted small">from {c.source.toLowerCase()} run</span>}</div>
+        <div><span className="muted small">Results</span><div>{c.score != null ? <Counts c={c.counts} /> : "—"}</div></div>
+        <div><span className="muted small">Last assessment</span><div>{time(c.lastAssessmentAt)}</div>
+          {c.lastDeepStatus && <Pill value={c.lastDeepStatus} />}</div>
+        <div><span className="muted small">Next scheduled</span><div>{time(c.nextAssessmentAt)}</div></div>
+        <div><span className="muted small">Open findings</span><div className="big">{c.openFindings}</div></div>
+        <div className="action-with-reason">
+          <button className="btn btn-primary" disabled={!c.runAction.enabled || run.isPending} title={c.runAction.reason}
+            onClick={() => run.mutate()}>RUN DEEP ASSESSMENT</button>
+          <div className={c.runAction.enabled ? "reason reason-ok" : "reason"}>{c.runAction.reason}</div>
+        </div>
+      </div>
+      <ErrorBox error={run.error} />
+      {findings.data && findings.data.items.length > 0 && (
+        <table className="dense"><tbody>{findings.data.items.map((f) => (
+          <tr key={f.id}><td><Pill value={f.severity} /></td><td><Pill value={f.status} /></td>
+            <td className="mono"><Link to={`/findings/${f.id}`}>{f.ruleId}</Link></td><td>{f.title}</td>
+            <td><Value value={f.observed} /></td><td><Pill value={f.source} /></td></tr>))}
+        </tbody></table>)}
+    </Panel>
   );
 }

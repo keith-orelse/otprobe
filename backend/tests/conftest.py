@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import socket
 import subprocess
@@ -148,14 +149,21 @@ def spawn_agent_runtime(api_url: str, log_path: Path) -> subprocess.Popen:
                             stdout=open(log_path, "w"), stderr=subprocess.STDOUT)
 
 
-@pytest.fixture
-async def live(db_path: Path, tmp_path: Path):
-    """Live API (heartbeat every 0.5 s) + agent runtime in a SEPARATE OS process. Yields (harness, process)."""
-    async with LiveServer(db_path, heartbeat_interval_sec=0.5) as srv:
+@contextlib.asynccontextmanager
+async def live_stack(db_path: Path, log_dir: Path, **settings):
+    """Live API over loopback HTTP + agent runtime in a SEPARATE OS process. Yields (harness, process)."""
+    settings = {"heartbeat_interval_sec": 0.5, **settings}
+    async with LiveServer(db_path, **settings) as srv:
         async with httpx.AsyncClient(base_url=srv.url, timeout=30) as client:
-            proc = spawn_agent_runtime(srv.url, tmp_path / "agent-runtime.log")
+            proc = spawn_agent_runtime(srv.url, log_dir / "agent-runtime.log")
             try:
                 yield await Harness(srv.app, client).login("operator"), proc
             finally:
                 proc.terminate()
                 proc.wait(5)
+
+
+@pytest.fixture
+async def live(db_path: Path, tmp_path: Path):
+    async with live_stack(db_path, tmp_path) as pair:
+        yield pair

@@ -62,7 +62,7 @@ rules:
   - id: WIN-SW-001
     title: No unauthorized software installed
     severity: MEDIUM
-    sources: [DEEP_AGENT, AGENTLESS]
+    sources: [DEEP_AGENT]   # per-user installs are invisible agentlessly (Phase 2 note N3)
     evidence: software.installed[].name
     condition: "not intersects $unauthorized_software"
     expected: none of the unauthorized software list
