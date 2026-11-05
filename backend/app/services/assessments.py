@@ -26,6 +26,7 @@ from app.models import (
     AgentTask,
     AssessmentRun,
     Asset,
+    AssetField,
     DriftEvent,
     EvidenceChange,
     Finding,
@@ -39,8 +40,29 @@ from app.workflow.machine import ASSESSMENT, TASK
 SCHEDULER = system("assessment-scheduler")
 EVALUATOR = system("assessment-engine")
 DEFAULT_POLICY = "windows-engineering-baseline"
+POLICY_BY_OS = {"windows": "windows-engineering-baseline", "linux": "linux-host-baseline"}
 COLLECTORS = ["os", "hardware", "firewall", "antivirus", "patches", "software", "services", "local_admins",
               "password_policy", "audit", "usb", "network", "agent"]
+# The Go agent (it reports a platform at enrollment) gets the collector set of its policy, which includes
+# collectors the simulated agent does not have.
+GO_AGENT_COLLECTORS = {
+    "windows-engineering-baseline": [*COLLECTORS, "rdp", "smb"],
+    "linux-host-baseline": ["os", "firewall", "packages", "patches", "services", "admins", "password_policy", "ssh",
+                            "audit", "usb", "network", "agent"],
+}
+
+
+def policy_for(session: Session, asset: Asset) -> str:
+    """The compliance policy for an asset's operating system (Windows baseline when unknown)."""
+    family = session.scalar(select(AssetField.value).where(AssetField.asset_id == asset.id,
+                                                           AssetField.field_path == "os.family"))
+    return POLICY_BY_OS.get(family, DEFAULT_POLICY)
+
+
+def collectors_for(agent: Agent, policy_key: str) -> list[str]:
+    if agent.platform and policy_key in GO_AGENT_COLLECTORS:
+        return GO_AGENT_COLLECTORS[policy_key]
+    return COLLECTORS
 ASSESSABLE = ("ONLINE", "STALE", "OFFLINE")
 ACTIVE_RUN = ("QUEUED", "RUNNING")
 
@@ -91,7 +113,7 @@ def run_action(session: Session, asset: Asset) -> schemas.ActionState:
         return schemas.ActionState(enabled=False, reason=f"Assessment {active.id[:8]} is {active.status}")
     if agent.status != "ONLINE":
         return schemas.ActionState(enabled=True, reason=f"Agent is {agent.status}: the task will wait in the queue")
-    return schemas.ActionState(enabled=True, reason="Run the Windows Engineering Baseline on the agent")
+    return schemas.ActionState(enabled=True, reason="Run the compliance baseline for this OS on the agent")
 
 
 def _create_run(ctx: AppContext, session: Session, asset: Asset, agent: Agent, trigger: str, actor, policy_key: str
@@ -106,7 +128,8 @@ def _create_run(ctx: AppContext, session: Session, asset: Asset, agent: Agent, t
                                             "trigger": trigger})
     task = AgentTask(agent_id=agent.id, kind="RUN_ASSESSMENT", assessment_run_id=run.id,
                      correlation_id=run.correlation_id,
-                     payload={"policyId": policy.key, "policyVersion": policy.version, "collectors": COLLECTORS,
+                     payload={"policyId": policy.key, "policyVersion": policy.version,
+                              "collectors": collectors_for(agent, policy.key),
                               "assessmentRunId": run.id})
     TASK.create(session, task, actor, {"agentId": agent.id, "kind": task.kind, "runId": run.id})
     return run
@@ -121,7 +144,7 @@ def request(ctx: AppContext, session: Session, asset_id: str, user: CurrentUser,
     if not action.enabled:
         raise ProblemError(409, "assessment-not-possible", "Assessment not possible", action.reason)
     agent = session.get(Agent, asset.current_agent_id)
-    run = _create_run(ctx, session, asset, agent, "MANUAL", user.actor, policy_key or DEFAULT_POLICY)
+    run = _create_run(ctx, session, asset, agent, "MANUAL", user.actor, policy_key or policy_for(session, asset))
     agent_id = agent.id
     return run_schema(session, run).dump(), lambda: ctx.signal(agent_id).set()
 
@@ -192,7 +215,7 @@ def scheduler_tick(ctx: AppContext) -> None:
                 continue
             if not run_action(s, asset).enabled:
                 continue
-            _create_run(ctx, s, asset, agent, "SCHEDULED", SCHEDULER, DEFAULT_POLICY)
+            _create_run(ctx, s, asset, agent, "SCHEDULED", SCHEDULER, policy_for(s, asset))
             s.flush()
             ctx.signal(agent.id).set()
 

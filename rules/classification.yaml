@@ -24,6 +24,22 @@ types:
       - { name: OPC UA listening, field: "network.listening[]", condition: "contains 4840", weight: 15 }
       - { name: OPC UA server identified, field: ot.protocols, condition: "contains 'opcua'", weight: 15 }
 
+  # A Windows PC or server with no engineering / SCADA software is an ordinary IT host on the plant network. Found
+  # on a real laptop, which the engineering-workstation type claimed at 41 % from "Windows + WinRM" alone.
+  - type: Windows Workstation
+    default_criticality: MEDIUM
+    level_hint: 3
+    signals:
+      - { name: Windows desktop OS, field: os.name, condition: "contains 'Windows' and not contains 'Server'", weight: 30 }
+      - { name: No engineering or SCADA software found, field: "software.installed[].name", condition: "not matches '(TIA Portal|Studio 5000|STEP 7|Automation Studio|SCADA|WinCC|FactoryTalk|Ignition)'", weight: 70 }
+
+  - type: Windows Server
+    default_criticality: HIGH
+    level_hint: 3
+    signals:
+      - { name: Windows Server OS, field: os.name, condition: "contains 'Server'", weight: 30 }
+      - { name: No SCADA software found, field: "software.installed[].name", condition: "not matches '(SCADA|WinCC|FactoryTalk|Ignition)'", weight: 70 }
+
   - type: Historian (Linux Server)
     default_criticality: HIGH
     level_hint: 2

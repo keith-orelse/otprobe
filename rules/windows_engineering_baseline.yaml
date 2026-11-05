@@ -3,7 +3,7 @@
 policy:
   id: windows-engineering-baseline
   name: Windows Engineering Baseline
-  version: 1.0.0
+  version: 1.1.0      # 1.1.0 adds WIN-PATCH-002, WIN-RDP-001, WIN-SMB-001 (Go agent evidence)
   kind: compliance
   description: Baseline hardening checks for Windows engineering workstations and SCADA servers.
   applies_to:
@@ -37,6 +37,7 @@ parameters:
     - Windows Server 2012 R2 Standard
     - Windows Server 2012 R2 Datacenter
   max_enabled_local_admins: 2
+  max_days_since_update: 90
 
 rules:
   - id: WIN-FW-001
@@ -153,6 +154,47 @@ rules:
     on_fail: { status: FAIL, severity: LOW }
     on_missing: { status: UNKNOWN }
     references: [IEC 62443-3-3 SR 2.8]
+
+  # The three rules below need collectors only the Go agent has (evidence schema 1.1 reports `platform`).
+  # Evidence without them (agentless, or the simulated agent) leaves the rules not applicable rather than UNKNOWN.
+  - id: WIN-PATCH-002
+    title: Security updates installed within 90 days
+    severity: HIGH
+    sources: [DEEP_AGENT]
+    applies_to: { platform.os: "== 'windows'" }
+    evidence: patches.last_installed_days
+    condition: "<= $max_days_since_update"
+    expected: an update installed in the last 90 days
+    on_fail: { status: FAIL, severity: HIGH }
+    on_missing: { status: UNKNOWN }
+    remediation: Install the current cumulative update during the next maintenance window.
+    references: [IEC 62443-2-3, NIST SP 800-82r3 6.2.7]
+
+  - id: WIN-RDP-001
+    title: Remote Desktop requires Network Level Authentication
+    severity: MEDIUM
+    sources: [DEEP_AGENT]
+    applies_to: { platform.os: "== 'windows'", rdp.enabled: "== true" }
+    evidence: rdp.nla_required
+    condition: "== true"
+    expected: NLA required whenever RDP is enabled
+    on_fail: { status: FAIL, severity: MEDIUM }
+    on_missing: { status: UNKNOWN }
+    remediation: Require Network Level Authentication for Remote Desktop, or disable RDP.
+    references: [IEC 62443-3-3 SR 1.1, NIST SP 800-82r3 6.2.1]
+
+  - id: WIN-SMB-001
+    title: SMBv1 disabled
+    severity: HIGH
+    sources: [DEEP_AGENT]
+    applies_to: { platform.os: "== 'windows'" }
+    evidence: smb.v1_enabled
+    condition: "== false"
+    expected: SMBv1 server protocol disabled
+    on_fail: { status: FAIL, severity: HIGH }
+    on_missing: { status: UNKNOWN }
+    remediation: Disable SMBv1 (Set-SmbServerConfiguration -EnableSMB1Protocol $false) after checking legacy clients.
+    references: [IEC 62443-3-3 SR 7.7, NIST SP 800-82r3 6.2.2]
 
   - id: AGT-HEALTH-001
     title: Probe agent healthy

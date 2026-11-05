@@ -142,12 +142,12 @@ class _Parser:
         for kw in ("in", "contains", "intersects"):
             if self.word(kw):
                 return Clause(kw, negate=negate, operand=self.operand())
-        if not negate and self.word("matches"):
+        if self.word("matches"):
             op = self.operand()
             if op.kind != "literal" or not isinstance(op.value, str):
                 raise ConditionSyntaxError("'matches' needs a string pattern")
             re.compile(op.value)
-            return Clause("matches", operand=op)
+            return Clause("matches", negate=negate, operand=op)   # "not matches": no element matches
         raise ConditionSyntaxError(f"cannot parse clause in {self.text!r}")
 
     def operand(self) -> Operand:

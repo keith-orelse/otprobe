@@ -8,7 +8,7 @@ eligibility:
     reason: Embedded or network device; agentless monitoring only.
   - when: { os.family: "== 'linux'" }
     result: NOT_SUPPORTED
-    reason: Linux agent not supported in this POC; agentless only (SSH/SNMP).
+    reason: Linux agent builds exist, but deployment over SSH is not built yet (phase L6); agentless only (SSH/SNMP).
   - when: { os.family: "== 'macos'" }
     result: NOT_SUPPORTED
     reason: macOS agent is not part of the first agent release; agentless only (SSH).

@@ -6,6 +6,7 @@ and the UI never hardcodes a status.
 
 | File | Kind | Evaluated on |
 |---|---|---|
+| `linux_host_baseline.yaml` | compliance | deep assessment evidence from the Go agent's Linux collectors; agentless SSH data for LNX-FW-001 and LNX-OS-001 |
 | `windows_engineering_baseline.yaml` | compliance | deep assessment evidence (agent); agentless probe data for rules with `AGENTLESS` in `sources` (WIN-FW-001, WIN-AV-001, WIN-OS-001) |
 | `telemetry.yaml` | telemetry | every MQTT message on `topic`, plus a staleness timer (`stale_after_sec`) |
 | `network.yaml` | event | discovery events (rogue device) |
@@ -42,7 +43,8 @@ clause      = [ "count" ] cmp_op operand          (* count: v must be a list; co
             | [ "not" ] "in" operand              (* v ∈ list *)
             | [ "not" ] "contains" operand        (* list: element ∈ v ; string: substring *)
             | [ "not" ] "intersects" operand      (* list v ∩ list operand ≠ ∅ *)
-            | "matches" string                    (* Python `re.search`; on a list: any element matches *)
+            | [ "not" ] "matches" string          (* Python `re.search`; on a list: any element matches;
+                                                     "not matches": no element matches *)
             | "is" [ "not" ] "empty" ;
 cmp_op      = "==" | "!=" | "<" | "<=" | ">" | ">=" ;
 operand     = string | number | "true" | "false" | list | "$" identifier ;   (* $x → policy parameter *)

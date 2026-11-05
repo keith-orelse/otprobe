@@ -1,0 +1,150 @@
+# Linux Host Baseline (docs/GO_AGENT.md §7). Evidence comes from the Go agent's Linux collectors; the rules marked
+# AGENTLESS are also evaluated from SSH probes. LNX-OS-001 reflects support dates as of November 2026 (Ubuntu 20.04
+# standard support ended May 2025, Debian 11 LTS August 2026): review it with each distribution release.
+policy:
+  id: linux-host-baseline
+  name: Linux Host Baseline
+  version: 1.0.0
+  kind: compliance
+  description: Baseline hardening checks for Linux HMIs, historians, gateways and servers on the plant network.
+  applies_to:
+    os.family: "== 'linux'"
+
+parameters:
+  max_days_since_update: 90
+
+rules:
+  - id: LNX-FW-001
+    title: Host firewall enabled
+    severity: HIGH
+    sources: [DEEP_AGENT, AGENTLESS]
+    evidence: firewall.state
+    condition: "== 'enabled'"
+    expected: an active packet filter with inbound rules
+    on_fail: { status: FAIL, severity: HIGH }
+    on_missing: { status: UNKNOWN }
+    remediation: Enable nftables, iptables, ufw or firewalld with a default-deny inbound policy.
+    references: [IEC 62443-3-3 SR 5.2, NIST SP 800-82r3 6.2.1]
+
+  - id: LNX-PATCH-001
+    title: No pending security updates
+    severity: HIGH
+    sources: [DEEP_AGENT]
+    evidence: patches.pending_security
+    condition: "== 0"
+    expected: 0 pending security updates (from the local package cache)
+    on_fail: { status: FAIL, severity: HIGH }
+    on_missing: { status: UNKNOWN }
+    remediation: Apply vendor-qualified security updates during the next maintenance window.
+    references: [IEC 62443-2-3, NIST SP 800-82r3 6.2.7]
+
+  - id: LNX-PATCH-002
+    title: Packages updated within 90 days
+    severity: MEDIUM
+    sources: [DEEP_AGENT]
+    evidence: patches.last_update_days
+    condition: "<= $max_days_since_update"
+    expected: a package update in the last 90 days
+    on_fail: { status: FAIL, severity: MEDIUM }
+    on_missing: { status: UNKNOWN }
+    references: [IEC 62443-2-3]
+
+  - id: LNX-OS-001
+    title: Distribution release is supported
+    severity: HIGH
+    sources: [DEEP_AGENT, AGENTLESS]
+    evidence: os.name
+    condition: "not matches '^(Ubuntu (12|14|16|18|20)\\.04|Debian GNU/Linux ([5-9]|1[01]) |CentOS Linux [5-8]|CentOS release [56]|Red Hat Enterprise Linux (Server )?[5-7]\\.|Raspbian GNU/Linux ([7-9]|1[01]) )'"
+    expected: a release still receiving security updates
+    on_fail: { status: FAIL, severity: HIGH }
+    on_missing: { status: UNKNOWN }
+    remediation: Plan an upgrade to a supported release or apply compensating controls.
+    references: [IEC 62443-2-3, NIST SP 800-82r3 6.2.7]
+
+  - id: LNX-SSH-001
+    title: SSH root login disabled (or key-only)
+    severity: HIGH
+    sources: [DEEP_AGENT]
+    evidence: ssh.permitrootlogin
+    condition: "in ['no', 'prohibit-password', 'without-password']"
+    expected: no password login as root
+    on_fail: { status: FAIL, severity: HIGH }
+    on_missing: { status: UNKNOWN }
+    remediation: Set PermitRootLogin no (or prohibit-password) in sshd_config.
+    references: [IEC 62443-3-3 SR 1.1]
+
+  - id: LNX-SSH-002
+    title: SSH password authentication disabled
+    severity: MEDIUM
+    sources: [DEEP_AGENT]
+    evidence: ssh.passwordauthentication
+    condition: "== 'no'"
+    expected: key-based SSH logins only
+    on_fail: { status: FAIL, severity: MEDIUM }
+    on_missing: { status: UNKNOWN }
+    references: [IEC 62443-3-3 SR 1.5]
+
+  - id: LNX-ADM-001
+    title: Only root has UID 0
+    severity: HIGH
+    sources: [DEEP_AGENT]
+    evidence: admins.uid0
+    condition: "count == 1"
+    expected: exactly one account (root) with UID 0
+    on_fail: { status: FAIL, severity: HIGH }
+    on_missing: { status: UNKNOWN }
+    references: [IEC 62443-3-3 SR 2.1]
+
+  - id: LNX-PWD-001
+    title: Password minimum length
+    severity: MEDIUM
+    sources: [DEEP_AGENT]
+    evidence: password_policy.min_length
+    condition: ">= 12"
+    expected: minimum length >= 12
+    on_fail: { status: FAIL, severity: MEDIUM }
+    on_missing: { status: UNKNOWN }
+    references: [IEC 62443-3-3 SR 1.7]
+
+  - id: LNX-PWD-002
+    title: Account lockout configured
+    severity: LOW
+    sources: [DEEP_AGENT]
+    evidence: password_policy.lockout_threshold
+    condition: "> 0 and <= 10"
+    expected: lockout after 1..10 failed attempts (pam_faillock)
+    on_fail: { status: FAIL, severity: LOW }
+    on_missing: { status: UNKNOWN }
+    references: [IEC 62443-3-3 SR 1.11]
+
+  - id: LNX-AUD-001
+    title: Audit daemon running
+    severity: LOW
+    sources: [DEEP_AGENT]
+    evidence: audit.auditd
+    condition: "== 'running'"
+    expected: auditd running
+    on_fail: { status: FAIL, severity: LOW }
+    on_missing: { status: UNKNOWN }
+    references: [IEC 62443-3-3 SR 2.8]
+
+  - id: LNX-USB-001
+    title: USB mass storage disabled
+    severity: MEDIUM
+    sources: [DEEP_AGENT]
+    evidence: usb.storage_policy
+    condition: "in ['blocked']"
+    expected: usb-storage module blacklisted or disabled
+    on_fail: { status: FAIL, severity: MEDIUM }
+    on_missing: { status: UNKNOWN }
+    references: [IEC 62443-3-3 SR 2.3]
+
+  - id: LNX-AGT-001
+    title: Probe agent healthy
+    severity: MEDIUM
+    sources: [DEEP_AGENT]
+    evidence: agent.health
+    condition: "== 'healthy'"
+    expected: healthy
+    on_fail: { status: FAIL, severity: MEDIUM }
+    on_missing: { status: UNKNOWN }
