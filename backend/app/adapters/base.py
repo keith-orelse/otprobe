@@ -26,6 +26,14 @@ class Protocol(str, enum.Enum):
     MQTT = "MQTT"
     SSH = "SSH"
     TCP = "TCP"
+    # Read-only OT identification plugins (docs/LIVE_PROTOCOLS.md §4)
+    MODBUS = "Modbus"
+    S7 = "S7"
+    ENIP = "EtherNet/IP"
+    BACNET = "BACnet"
+    OPCUA = "OPC UA"
+    HTTP = "HTTP"
+    OT = "OT"                       # summary of which OT protocols answered (ot.protocols)
 
 
 # Protocols every adapter set must provide. TCP is optional (the simulated POC has no TCP step).
@@ -197,6 +205,21 @@ class SshAdapter(ProtocolAdapter):
     protocol = Protocol.SSH
 
 
+class OtPlugin(abc.ABC):
+    """Read-only identification of one OT protocol: one short session, one or two identification requests, close.
+    Runs only when its port answered (or, for UDP, when the scope entry enables it) and the gate allows plugins."""
+
+    name: str                       # "modbus": the key used in scope entries' ``plugins`` list
+    protocol: Protocol
+    display_label: str
+    ports: tuple[int, ...]          # TCP ports that trigger it; empty = UDP, explicit opt-in only
+    risk: str = "LOW"               # LOW | MEDIUM; HIGH-risk protocols are never active plugins
+
+    @abc.abstractmethod
+    async def identify(self, target: Target) -> AdapterResult:
+        """``target.port`` is the open port that triggered the plugin (or None)."""
+
+
 class RemoteOperation(str, enum.Enum):
     """Closed set of remote operations the deployment/removal engines may request.
     A real WinRM adapter maps each to a vetted PowerShell script; no free-form commands."""
@@ -297,6 +320,7 @@ class MaskedCredential:
     username: str
     secret: str = "••••••••"
     secret_set: bool = True
+    port: Optional[int] = None      # non-secret: a service on a non-standard port (params.port), checked before use
 
 
 class CredentialVault(abc.ABC):

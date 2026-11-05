@@ -24,6 +24,8 @@ ACTOR = system("probe-engine")
 STEPS = ["ICMP", "ARP", "WINRM", "WMI", "SNMP", "SSH", "MQTT", "COLLECT", "CLASSIFY", "EVALUATE"]
 SAFE_MODE_SKIP = "Safe mode (Level 0/1): only passive/read-only methods are used"
 WMI_GROUPS = ["os", "hardware", "firewall", "antivirus", "software", "services", "hotfixes", "network"]
+SSH_GROUPS = ["identity", "packages", "services", "network", "firewall"]
+OT_PROTOCOLS = {"modbus", "s7", "enip", "bacnet", "opcua"}   # plugin names that count as OT protocols
 
 
 class ProbeEngine:
@@ -46,6 +48,47 @@ class ProbeEngine:
         except KeyError:
             return None
 
+    async def _ot_step(self, ip: str, open_ports: set[int], tracker: StepTracker, record) -> None:
+        tracker.start("OT", "Read-only OT protocol identification")
+        answered: list[str] = []
+        parts: list[str] = []
+        not_enabled: list[str] = []
+        for plugin in self.ctx.registry.plugins():
+            ports = [p for p in plugin.ports if p in open_ports]
+            if plugin.ports and not ports:
+                continue                                   # its port did not answer: nothing is sent
+            res = await plugin.identify(Target(ip, port=ports[0] if ports else None, timeout_sec=3.0))
+            if res.error_code == "PLUGIN_NOT_ENABLED":
+                if plugin.ports:
+                    not_enabled.append(plugin.display_label)
+                continue
+            record(res)
+            if res.ok:
+                answered.append(plugin.name)
+                ident = " ".join(str(res.data[k]) for k in ("hardware.vendor", "hardware.model", "plc.product_code",
+                                                              "http.title", "opcua.application_name")
+                                 if res.data.get(k))
+                parts.append(f"{plugin.display_label}: {ident or 'answered'}")
+            else:
+                parts.append(f"{plugin.display_label}: {res.error_detail or res.status.value}")
+        ot = sorted(n for n in answered if n in OT_PROTOCOLS)
+        if ot:
+            record(AdapterResult(Protocol.OT, ip, ResultStatus.OK, {"ot.protocols": ot}, collected_at=utcnow(),
+                                 latency_ms=0.0))
+        if not_enabled:
+            parts.append(f"not enabled for this range: {', '.join(not_enabled)}")
+        if parts:
+            tracker.ok("OT", "; ".join(parts))
+        else:
+            tracker.skip("OT", "No OT or web service port answered")
+
+    async def _port(self, profile: str, default: int) -> int:
+        """A profile's non-standard service port (params.port), read without retrieving the secret."""
+        try:
+            return (await self.ctx.vault.describe(profile)).port or default
+        except KeyError:
+            return default
+
     def _audit(self, asset_id: str, event: str, detail: str | None) -> None:
         with self.ctx.db.session() as s:
             audit.record(s, ACTOR, event, "asset", asset_id, {"message": detail})
@@ -60,6 +103,8 @@ class ProbeEngine:
         steps = list(STEPS)
         if self.ctx.registry.has(Protocol.TCP):
             steps.insert(steps.index("ARP") + 1, "TCP")
+        if self.ctx.registry.plugins():
+            steps.insert(steps.index("SNMP") + 1, "OT")
         tracker.plan(steps)
         try:
             await self._run(probe_id, tracker)
@@ -121,10 +166,13 @@ class ProbeEngine:
             tracker.fail("ARP", res.error_detail or "No ARP entry")
 
         tcp_up = False
+        open_ports = set(known.get("network.open_ports") or [])
         if reg.has(Protocol.TCP):
             tracker.start("TCP", "TCP connect to known service ports (no payload)")
             res = record(await reg.get(Protocol.TCP).probe(Target(ip, safe_mode=safe), Query([])))
             tcp_up = res.status in (ResultStatus.OK, ResultStatus.REFUSED)
+            if tcp_up:
+                open_ports = set(res.data.get("network.open_ports") or [])
             if res.ok:
                 tracker.ok("TCP", f"Open ports: {', '.join(map(str, res.data.get('network.open_ports', [])))}")
             elif tcp_up:
@@ -148,11 +196,12 @@ class ProbeEngine:
         # WinRM + WMI
         session = None
         winrm = reg.get(Protocol.WINRM)
-        tracker.start("WINRM", f"HTTPS {ip}:5986")
+        winrm_port = await self._port("OT-WINDOWS-READONLY", 5986)
+        tracker.start("WINRM", f"{'HTTP' if winrm_port == 5985 else 'HTTPS'} {ip}:{winrm_port}")
         if safe:
             tracker.skip("WINRM", SAFE_MODE_SKIP)
         else:
-            hc = await winrm.health_check(Target(ip, port=5986))
+            hc = await winrm.health_check(Target(ip, port=winrm_port))
             cred = None if not hc.ok else await self._cred("OT-WINDOWS-READONLY", probe_id, cid)
             if hc.status == ResultStatus.NOT_SUPPORTED:
                 tracker.skip("WINRM", hc.error_detail or "WinRM not available")
@@ -165,7 +214,9 @@ class ProbeEngine:
                     tracker.fail("WINRM", hc.error_detail or hc.status.value)
                     self._audit(asset_id, winrm_event(hc.status), hc.error_detail)
                 else:
-                    tracker.skip("WINRM", "TCP 5986 closed: WinRM not available on this device")
+                    tracker.skip("WINRM", f"TCP {winrm_port} closed: WinRM not available on this device"
+                                 if hc.status == ResultStatus.REFUSED else
+                                 f"TCP {winrm_port} not answering: no WinRM listener, or a firewall drops it")
             else:
                 stages: list[dict[str, Any]] = []
 
@@ -173,7 +224,7 @@ class ProbeEngine:
                     stages.append({"name": st.name, "status": st.status.value, "detail": st.detail})
                     tracker.update("WINRM", f"{st.name}: {st.detail}", data={"stages": list(stages)})
 
-                res, session = await winrm.open_session(Target(ip, port=5986, credential=cred), on_stage)
+                res, session = await winrm.open_session(Target(ip, port=winrm_port, credential=cred), on_stage)
                 record(res)
                 if session is not None:
                     tracker.ok("WINRM", f"Session created as {cred.username} (profile {cred.profile})",
@@ -187,7 +238,8 @@ class ProbeEngine:
         if session is None:
             tracker.skip("WMI", SAFE_MODE_SKIP if safe else "Requires a WinRM session")
         else:
-            res = record(await reg.get(Protocol.WMI).probe(Target(ip, port=5986, credential=cred), Query(WMI_GROUPS)))
+            res = record(await reg.get(Protocol.WMI).probe(Target(ip, port=winrm_port, credential=cred),
+                                                           Query(WMI_GROUPS)))
             await winrm.close_session(session)
             if res.ok:
                 tracker.ok("WMI", f"Collected {', '.join(WMI_GROUPS)} ({len(res.data)} fields)")
@@ -220,27 +272,50 @@ class ProbeEngine:
         else:
             tracker.skip("SNMP", "No SNMP agent responded")
 
-        # SSH (stub)
-        tracker.start("SSH", f"SSH {ip}:22")
+        # OT identification plugins: read-only, one short session each; the gate decides per range
+        if reg.plugins():
+            await self._ot_step(ip, open_ports, tracker, record)
+
+        # SSH
+        ssh_port = await self._port("OT-LINUX-SSH-RO", 22)
+        tracker.start("SSH", f"SSH {ip}:{ssh_port}")
         ssh = reg.get(Protocol.SSH)
         if safe:
             tracker.skip("SSH", SAFE_MODE_SKIP)
         else:
-            hc = await ssh.health_check(Target(ip, port=22))
+            hc = await ssh.health_check(Target(ip, port=ssh_port))
             ssh_cred = None
             if hc.status == ResultStatus.NOT_SUPPORTED:
                 tracker.skip("SSH", hc.error_detail or "SSH not available")
             elif hc.status in (ResultStatus.REFUSED, ResultStatus.UNREACHABLE):
-                tracker.skip("SSH", "TCP 22 closed: SSH not available on this device")
+                tracker.skip("SSH", f"TCP {ssh_port} closed: SSH not available on this device"
+                             if hc.status == ResultStatus.REFUSED else
+                             f"TCP {ssh_port} not answering: no SSH server, or a firewall drops it")
             elif (ssh_cred := await self._cred("OT-LINUX-SSH-RO", probe_id, cid)) is None:
                 tracker.skip("SSH", "No credential profile 'OT-LINUX-SSH-RO' in the vault")
             else:
-                res = record(await ssh.probe(Target(ip, port=22, credential=ssh_cred), Query(["identity"])))
+                if "services.ssh.banner" in hc.data:
+                    record(hc)
+                pinned = known.get("ssh.host_key")
+                res = record(await ssh.probe(Target(ip, port=ssh_port, credential=ssh_cred,
+                                                    options={"host_key": pinned} if pinned else {}),
+                                             Query(SSH_GROUPS)))
                 if res.ok:
-                    tracker.ok("SSH", f"{res.data.get('os.product')} · kernel {res.data.get('os.kernel')}")
+                    if not pinned and res.data.get("ssh.host_key"):
+                        self._audit(asset_id, "SSH_HOST_KEY_PINNED",
+                                    f"Trusted on first use: {res.data['ssh.host_key']}")
+                    os_name = res.data.get("os.name") or res.data.get("os.product")
+                    detail = f"{os_name} · kernel {res.data.get('os.kernel')}"
+                    if "software.installed" in res.data:
+                        detail += f" · {len(res.data['software.installed'])} packages"
+                    if res.status == ResultStatus.PARTIAL:
+                        detail += f" ({res.error_detail})"
+                    tracker.ok("SSH", detail)
                 else:
                     failed.append("SSH")
                     tracker.fail("SSH", res.error_detail or res.status.value)
+                    if res.error_code == "HOST_KEY_CHANGED":
+                        self._audit(asset_id, "SSH_HOST_KEY_CHANGED", res.error_detail)
 
         # MQTT
         tracker.start("MQTT", "Broker client lookup")

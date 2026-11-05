@@ -31,3 +31,25 @@ async def connect(gate: NetworkGate, ip: str, port: int, timeout_sec: float) -> 
         with contextlib.suppress(OSError, asyncio.TimeoutError):
             await asyncio.wait_for(writer.wait_closed(), 1.0)
         return PortState(port, "OPEN", rtt)
+
+
+async def read_banner(gate: NetworkGate, ip: str, port: int, timeout_sec: float, max_bytes: int = 256
+                      ) -> tuple[PortState, str | None]:
+    """Connect and read what the server volunteers (e.g. 'SSH-2.0-OpenSSH_9.6'). Nothing is ever written."""
+    async with gate.permit(ip, "TCP_BANNER"):
+        try:
+            reader, writer = await asyncio.wait_for(asyncio.open_connection(ip, port), timeout_sec)
+        except ConnectionRefusedError:
+            return PortState(port, "CLOSED"), None
+        except (asyncio.TimeoutError, OSError):
+            return PortState(port, "FILTERED"), None
+        try:
+            line = await asyncio.wait_for(reader.readline(), timeout_sec)
+            banner = line[:max_bytes].decode(errors="replace").strip() or None
+        except (asyncio.TimeoutError, OSError):
+            banner = None
+        finally:
+            writer.close()
+            with contextlib.suppress(OSError, asyncio.TimeoutError):
+                await asyncio.wait_for(writer.wait_closed(), 1.0)
+        return PortState(port, "OPEN"), banner

@@ -38,17 +38,49 @@ def test_only_the_net_package_can_touch_the_network():
     assert not bad, f"network access outside app/adapters/real/net: {bad}"
 
 
+# Names that open a connection or send a packet. A sender either does that inside ``gate.permit`` itself, or only
+# calls other senders in this package (which do).
+QUALIFIED = {"asyncio.open_connection", "asyncssh.connect", "icmplib.async_ping", "socket.socket",
+             "socket.create_connection"}
+ANY_RECEIVER = {"create_datagram_endpoint", "execute_ps", "stream", "create_connection", "sendto"}
+BARE = {"Exchange"}
+
+
+def _primitive(call: ast.Call) -> str | None:
+    f = call.func
+    if isinstance(f, ast.Name):
+        return f.id if f.id in BARE else None
+    if isinstance(f, ast.Attribute):
+        qualified = f"{f.value.id}.{f.attr}" if isinstance(f.value, ast.Name) else f.attr
+        if qualified in QUALIFIED or f.attr in ANY_RECEIVER:
+            return qualified
+    return None
+
+
+def _inside_permit(tree: ast.AST) -> set[int]:
+    """ids of nodes lexically inside an ``async with gate.permit(...)`` block."""
+    inside: set[int] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.AsyncWith) and any(
+                isinstance(i.context_expr, ast.Call) and isinstance(i.context_expr.func, ast.Attribute)
+                and i.context_expr.func.attr == "permit" for i in node.items):
+            inside |= {id(n) for n in ast.walk(node)}
+    return inside
+
+
 @pytest.mark.parametrize("path", sorted(NET_DIR.glob("*.py")), ids=lambda p: p.name)
-def test_every_sender_in_net_goes_through_the_gate(path: Path):
-    """Each module that imports a network library must call gate.permit at least once per sending function."""
-    tree = ast.parse(path.read_text())
-    if path.name in ("__init__.py", "gate.py", "neighbors.py"):   # neighbors only reads the local kernel table
+def test_every_network_primitive_in_net_runs_inside_a_gate_permit(path: Path):
+    if path.name in ("__init__.py", "gate.py", "_stream.py"):    # _stream.Exchange is checked where it is used
         return
-    senders = [f for f in ast.walk(tree) if isinstance(f, ast.AsyncFunctionDef) and not f.name.startswith("_")]
-    assert senders, f"{path.name} has no public senders"
-    for f in senders:
-        permits = [n for n in ast.walk(f) if isinstance(n, ast.Attribute) and n.attr == "permit"]
-        assert permits, f"{path.name}:{f.name} sends without gate.permit"
+    tree = ast.parse(path.read_text())
+    inside = _inside_permit(tree)
+    outside = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and (name := _primitive(node)) and id(node) not in inside:
+            outside.append(f"{name} (line {node.lineno})")
+    assert not outside, f"{path.name}: network primitive outside gate.permit: {outside}"
+
+
 
 
 def test_snmp_module_cannot_build_a_set_request():

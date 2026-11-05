@@ -287,6 +287,15 @@ class SafetyView(Camel):
     traffic: dict[str, Any] | None = None
 
 
+class PluginInfo(Camel):
+    name: str
+    label: str
+    protocol: str
+    ports: list[int]
+    risk: str
+    udp: bool = Field(description="UDP plugins have no open port to justify them: they run only where listed")
+
+
 class Environment(Camel):
     mode: Literal["LIVE", "SIMULATED"]
     banner: str

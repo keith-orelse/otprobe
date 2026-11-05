@@ -252,7 +252,7 @@ Each phase ends with a review stop, as before.
 |---|---|---|
 | **L1** | This design | Review |
 | **L2** ✅ | Scan scope + network gate + kill switch + safe mode, real ICMP / ARP (neighbour cache) / TCP / SNMP, live discovery and probe, credential vault admin, live banner and console. Live mode is the default; the simulator stays loadable for the test suite until L6 (DECISIONS.md L2-1) | Unit + live loopback tests; lab discovery |
-| **L3** | Agentless: WinRM/WMI, SSH, OT protocol plugins (Modbus, S7, EtherNet/IP, BACnet, OPC UA), classification | Container tests + lab (Conpot, OpenPLC, VMs) |
+| **L3** ✅ | Agentless: WinRM/WMI (read-only), SSH (read-only, host-key pinning), OT identification plugins (Modbus, S7, EtherNet/IP, BACnet, OPC UA, web title), classification signals, plugin selection per scope entry | Live tests against real Modbus/OPC UA/SSH/TLS servers and recording fake S7/ENIP/BACnet devices; Windows on a lab host |
 | **L4** | Go agent (Windows modern + legacy, Linux), build pipeline, install/uninstall scripts, real deployment and removal | Go unit tests + lab VMs |
 | **L5** | Real assessments, Linux baseline, drift. Bundled Mosquitto, telemetry sources, broker checks | Lab |
 | **L6** | Simulator moved out of `app/` into the test suite; full lab campaign (acceptance + failure matrix), packet-capture verification, docs, pilot runbook | [LIVE_TEST_PLAN.md](LIVE_TEST_PLAN.md) |

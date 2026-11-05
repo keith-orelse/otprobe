@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.adapters.base import REQUIRED_PROTOCOLS, Protocol, ProtocolAdapter
+from app.adapters.base import REQUIRED_PROTOCOLS, OtPlugin, Protocol, ProtocolAdapter
 
 
 def parse_overrides(raw: str) -> dict[str, str]:
@@ -21,6 +21,7 @@ class AdapterRegistry:
         self.mode = mode
         self.overrides = overrides or {}
         self._impls: dict[tuple[Protocol, str], ProtocolAdapter] = {}
+        self._plugins: dict[str, OtPlugin] = {}
 
     def register(self, protocol: Protocol, implementation: str, adapter: ProtocolAdapter) -> None:
         self._impls[(protocol, implementation)] = adapter
@@ -34,6 +35,12 @@ class AdapterRegistry:
             return self._impls[(protocol, impl)]
         except KeyError:
             raise RuntimeError(f"No {impl} adapter registered for protocol '{protocol.value.lower()}'") from None
+
+    def register_plugin(self, plugin: OtPlugin) -> None:
+        self._plugins[plugin.name] = plugin
+
+    def plugins(self) -> list[OtPlugin]:
+        return list(self._plugins.values())
 
     def has(self, protocol: Protocol) -> bool:
         return (protocol, self.selected(protocol)) in self._impls

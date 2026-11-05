@@ -66,3 +66,10 @@ async def rearm(req: schemas.SafetyReason, user: CurrentUser = Depends(admin_onl
 async def safe_mode(req: schemas.SafeModeChange, user: CurrentUser = Depends(admin_only),
                     idem: Idempotency = Depends(require_idempotency), ctx: AppContext = Depends(get_ctx)):
     return idem.execute(ctx.db, 200, lambda s: safety.set_safe_mode(ctx, s, req, user.actor))
+
+
+@router.get("/plugins", response_model=list[schemas.PluginInfo],
+            summary="Read-only OT identification plugins (enable per scope entry for OT-sensitive ranges)")
+async def plugins(user: CurrentUser = Depends(any_user), ctx: AppContext = Depends(get_ctx)):
+    return [schemas.PluginInfo(name=p.name, label=p.display_label, protocol=p.protocol.value, ports=list(p.ports),
+                               risk=p.risk, udp=not p.ports) for p in ctx.registry.plugins()]

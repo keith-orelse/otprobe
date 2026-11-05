@@ -89,7 +89,7 @@ async def test_live_discovery_and_probe_on_loopback(live, tcp_listener, snmp_age
     probe = await live.get(f"/probes/{r.json()['id']}")
     steps = {s["name"]: s for s in probe["steps"]}
     assert steps["ICMP"]["status"] == "OK" and steps["TCP"]["status"] == "OK"
-    assert steps["WINRM"]["status"] == "SKIPPED" and "phase L3" in steps["WINRM"]["detail"]
+    assert steps["WINRM"]["status"] == "SKIPPED" and "TCP 5986 closed" in steps["WINRM"]["detail"]
     assert steps["SNMP"]["status"] == "SKIPPED" and "OT-SNMPV3-RO" in steps["SNMP"]["detail"]
 
 

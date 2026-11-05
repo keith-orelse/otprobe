@@ -6,3 +6,4 @@ import-linter>=2.1
 openapi-spec-validator>=0.7
 ruff>=0.7
 playwright>=1.48
+pymodbus>=3.7     # test fixture only: a real Modbus server for the plugin tests

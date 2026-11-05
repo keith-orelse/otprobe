@@ -22,6 +22,7 @@ types:
       - { name: SCADA software detected, field: "software.installed[].name", condition: "matches '(SCADA|WinCC|FactoryTalk|Ignition)'", weight: 40 }
       - { name: Hostname pattern, field: identity.hostname, condition: "matches '^scada'", weight: 15 }
       - { name: OPC UA listening, field: "network.listening[]", condition: "contains 4840", weight: 15 }
+      - { name: OPC UA server identified, field: ot.protocols, condition: "contains 'opcua'", weight: 15 }
 
   - type: Historian (Linux Server)
     default_criticality: HIGH
@@ -38,6 +39,9 @@ types:
       - { name: PLC operating mode reported, field: plc.mode, condition: "in ['RUN', 'STOP', 'PROGRAM']", weight: 50 }
       - { name: Controller model, field: hardware.model, condition: "matches '(S7-|ControlLogix|CompactLogix|PLC)'", weight: 30 }
       - { name: Firmware reported, field: firmware.version, condition: "is not empty", weight: 20 }
+      - { name: Answers as a controller over S7 or EtherNet/IP, field: ot.protocols, condition: "intersects ['s7', 'enip']", weight: 40 }
+      - { name: CIP device type is PLC, field: ot.device_type, condition: "== 'Programmable Logic Controller'", weight: 30 }
+      - { name: Siemens CPU order code, field: plc.product_code, condition: "matches '^6ES7'", weight: 30 }
 
   - type: Industrial Switch
     default_criticality: HIGH
@@ -52,3 +56,20 @@ types:
     signals:
       - { name: Publishes process telemetry, field: telemetry.kind, condition: "in ['temperature', 'pressure', 'flow', 'level']", weight: 70 }
       - { name: ICMP disabled (typical field device), field: reachability.icmp, condition: "== 'BLOCKED'", weight: 30 }
+
+  - type: BACnet Controller
+    default_criticality: MEDIUM
+    level_hint: 1
+    signals:
+      - { name: Answers BACnet ReadProperty, field: ot.protocols, condition: "contains 'bacnet'", weight: 70 }
+      - { name: Firmware reported, field: firmware.version, condition: "is not empty", weight: 30 }
+
+  - type: Modbus Device
+    default_criticality: HIGH
+    level_hint: 1
+    signals:
+      - { name: Answers Modbus Read Device Identification, field: ot.protocols, condition: "contains 'modbus'", weight: 40 }
+      - { name: Vendor reported, field: hardware.vendor, condition: "is not empty", weight: 20 }
+      # A controller that also serves Modbus must stay a PLC: this signal only matches Modbus-only devices, and
+      # without it the type stays below min_confidence (60 of 200 = 30 %).
+      - { name: Not identified as a controller by S7 or EtherNet/IP, field: ot.protocols, condition: "not intersects ['s7', 'enip']", weight: 140 }

@@ -3,12 +3,15 @@ eligibility:
   - when: { classification.type: "== 'PLC'" }
     result: NOT_ELIGIBLE
     reason: Traditional PLCs are handled agentless/read-only in this POC.
-  - when: { classification.type: "in ['Sensor', 'Industrial Switch']" }
+  - when: { classification.type: "in ['Sensor', 'Industrial Switch', 'BACnet Controller', 'Modbus Device']" }
     result: NOT_ELIGIBLE
     reason: Embedded or network device; agentless monitoring only.
   - when: { os.family: "== 'linux'" }
     result: NOT_SUPPORTED
     reason: Linux agent not supported in this POC; agentless only (SSH/SNMP).
+  - when: { os.family: "== 'macos'" }
+    result: NOT_SUPPORTED
+    reason: macOS agent is not part of the first agent release; agentless only (SSH).
   - when: { os.family: "== 'windows'", asset.criticality: "== 'CRITICAL'" }
     result: REVIEW_REQUIRED
     reason: Critical asset; deployment requires approver review and a maintenance window.

@@ -14,12 +14,28 @@ parameters:
     - RemoteTool Demo
     - AnyRemote Demo
     - TeamViewer-style Remote (demo data)
+  # Exact product names as Windows reports them (caption without "Microsoft "). Windows 10 general releases left
+  # support in October 2025; LTSC editions (e.g. "Windows 10 Enterprise LTSC 2021") are supported longer and are
+  # deliberately not listed.
   unsupported_os_products:
+    - Windows 7 Home Premium
     - Windows 7 Professional
     - Windows 7 Enterprise
-    - Windows 10 Enterprise
+    - Windows 7 Ultimate
+    - Windows 8.1
+    - Windows 8.1 Pro
+    - Windows 8.1 Enterprise
+    - Windows 10 Home
     - Windows 10 Pro
+    - Windows 10 Pro for Workstations
+    - Windows 10 Education
+    - Windows 10 Enterprise
+    - Windows Server 2008 R2 Standard
+    - Windows Server 2008 R2 Enterprise
+    - Windows Server 2012 Standard
     - Windows Server 2012 R2
+    - Windows Server 2012 R2 Standard
+    - Windows Server 2012 R2 Datacenter
   max_enabled_local_admins: 2
 
 rules:

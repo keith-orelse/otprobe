@@ -73,13 +73,13 @@ class OtProtocolPlugin(Protocol):
 
 | Plugin | Covers (examples) | Exactly what is sent | Library | Risk |
 |---|---|---|---|---|
-| `modbus` | Schneider Modicon/M-series, Wago, many gateways and meters | Function 43 / MEI type 14 *Read Device Identification* (basic objects 0x00–0x02, then regular 0x03–0x06 if supported) | `pymodbus` client, with a function-code allowlist enforced in a wrapper | LOW |
+| `modbus` | Schneider Modicon/M-series, Wago, many gateways and meters | Function 43 / MEI type 14 *Read Device Identification* (basic objects 0x00–0x02, then regular 0x03–0x06 if supported), unit 1 | Own encoder (tested against the pymodbus server) | LOW |
 | `s7` | Siemens S7-300/400/1200/1500, ET200 CPUs | COTP connect → S7 setup communication → SZL read 0x0011 (module ID) and 0x001C (component ID) → disconnect | Small pure-Python S7comm reader (no `snap7` native dependency) | MEDIUM: uses one of the CPU's limited connection slots for about 1 s |
 | `enip` | Rockwell / Allen-Bradley ControlLogix, CompactLogix, Micro800; Omron; many drives | EtherNet/IP `ListIdentity` (encapsulation command 0x63). No CIP session, no tag reads | Own ~80-line encoder | LOW |
-| `bacnet` | Building automation controllers | Unicast `Who-Is` to the target → `ReadProperty` (object-name, vendor-name, model-name, firmware-revision) on the Device object | `bacpypes3` | LOW |
+| `bacnet` | Building automation controllers | `ReadProperty` (object-name, vendor-name, model-name, firmware-revision) on the Device object, using the wildcard instance 4194303 ("the device I am talking to"). No `Who-Is` (devices often answer it by broadcast, which a unicast scanner cannot receive) | Own encoder | LOW |
 | `opcua` | Modern controllers, SCADA servers, gateways | `GetEndpoints` only (no session). Optionally `FindServers` | `asyncua` | LOW |
 | `http_title` | Web HMIs, switch UIs, gateways | One `GET /` and `<title>` + `Server` header. No login, no further crawling | `httpx` via the gate | LOW |
-| `mac_vendor` | Everything with a MAC | Nothing: offline IEEE OUI lookup | Bundled OUI file | none |
+| `mac_vendor` | Everything with a MAC | Nothing: offline IEEE OUI lookup | Bundled OUI file | none — **not built yet** (needs a licensed OUI file shipped offline) |
 
 **Not active plugins:** PROFINET DCP, DNP3, IEC 60870-5-104, Siemens S7comm-plus, GE SRTP, Omron FINS,
 CODESYS. Some are layer-2 only; others are known to disturb some stacks even with read requests, or have no
@@ -132,3 +132,22 @@ Eligibility (`rules/eligibility.yaml`) maps class + OS to an **agent profile** o
 | **C-17 (new)** | Every gate call checks scope: an out-of-scope target returns `BLOCKED` and sends zero bytes |
 | **C-18 (new)** | Each plugin, against a recording fake server, sends only its `allowed_ops`. Attempts to build a write request raise `WriteAttemptBlocked` |
 | **C-19 (new)** | Kill switch: after `stop`, every adapter call returns `BLOCKED: kill-switch` within 1 s, and open sessions are closed |
+
+## 7. Implementation notes (phase L3)
+
+- **Where plugins run:** in the agentless **probe** (step `OT`), not in discovery. A plugin runs only if its TCP port
+  answered (UDP plugins: only where listed on the scope entry) and the gate allows plugins for the address: never in
+  safe mode; on IT ranges every TCP plugin by default; on OT-sensitive ranges only the plugins listed on the entry.
+- **Frame guards:** every OT sender writes through `_stream.Exchange`, which checks each frame against the plugin's
+  read-only allow-list before a single byte is written (`WriteAttemptBlocked`). Modbus allows FC 43/14 only; S7 allows
+  COTP connect, setup communication and read-SZL only; ENIP allows command 0x63 only; BACnet allows ReadProperty only.
+- **SSH:** commands are requested by name from a fixed read-only list. Host keys are pinned on first use
+  (`SSH_HOST_KEY_PINNED`); a changed key aborts before authentication (`SSH_HOST_KEY_CHANGED`). Without root the
+  firewall rule set is unreadable, so only an *active* firewall service is reported; an inactive one stays UNKNOWN.
+- **WinRM:** read-only PowerShell scripts by name, parameters validated by strict patterns. Needs PowerShell 3.0+
+  (stock Windows 7 / 2008 R2 has 2.0: reported clearly, covered by the Go agent in L4). Certificate chains are
+  verified by OTProbe before pypsrp connects (without hostname matching, as targets are addressed by IP); pinning
+  the certificate inside the pypsrp session is tracked for L6. Operations that change a host answer NOT_SUPPORTED
+  until L4.
+- **Non-standard ports:** a credential profile's `params.port` sets the SNMP, SSH or WinRM port (5985 = HTTP with
+  message encryption, anything else = HTTPS).

@@ -6,15 +6,15 @@ from app.adapters.base import Protocol
 from app.adapters.real.arp import RealArpAdapter
 from app.adapters.real.icmp import RealIcmpAdapter
 from app.adapters.real.net.gate import NetworkGate, ScopeEntry
+from app.adapters.real.plugins import ALL_PLUGINS
 from app.adapters.real.snmp import RealSnmpAdapter
+from app.adapters.real.ssh import RealSshAdapter
 from app.adapters.real.tcp import RealTcpAdapter
 from app.adapters.real.unavailable import (
     UnavailableMqtt,
-    UnavailableSsh,
     UnavailableTransfer,
-    UnavailableWinRm,
-    UnavailableWmi,
 )
+from app.adapters.real.winrm import RealWinRmAdapter, RealWmiAdapter
 from app.adapters.registry import AdapterRegistry
 
 
@@ -23,10 +23,12 @@ def register_real(registry: AdapterRegistry, gate: NetworkGate) -> None:
     registry.register(Protocol.ARP, "real", RealArpAdapter(gate))
     registry.register(Protocol.TCP, "real", RealTcpAdapter(gate))
     registry.register(Protocol.SNMP, "real", RealSnmpAdapter(gate))
-    registry.register(Protocol.WINRM, "real", UnavailableWinRm())
-    registry.register(Protocol.WMI, "real", UnavailableWmi())
-    registry.register(Protocol.SSH, "real", UnavailableSsh())
+    registry.register(Protocol.WINRM, "real", RealWinRmAdapter(gate))
+    registry.register(Protocol.WMI, "real", RealWmiAdapter(gate))
+    registry.register(Protocol.SSH, "real", RealSshAdapter(gate))
     registry.register(Protocol.MQTT, "real", UnavailableMqtt())
+    for plugin in ALL_PLUGINS:
+        registry.register_plugin(plugin(gate))
 
 
 __all__ = ["register_real", "NetworkGate", "ScopeEntry", "UnavailableTransfer"]

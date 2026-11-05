@@ -32,7 +32,9 @@ class LocalCredentialVault(CredentialVault):
 
     @staticmethod
     def _mask(row: CredentialProfile) -> MaskedCredential:
-        return MaskedCredential(row.name, row.protocol, row.username, MASK, bool(row.secret_ciphertext))
+        port = (row.params or {}).get("port")
+        return MaskedCredential(row.name, row.protocol, row.username, MASK, bool(row.secret_ciphertext),
+                                int(port) if port else None)
 
     async def describe(self, profile: str) -> MaskedCredential:
         with self.db.session() as s:

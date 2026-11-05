@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiAction, apiGet, apiSend } from "../api";
 import { useMe } from "../auth";
 import { ErrorBox, Panel, Pill, ago } from "../components/ui";
-import type { SafetyView, ScanScope, VaultProfile } from "../types";
+import type { PluginInfo, SafetyView, ScanScope, VaultProfile } from "../types";
 
 const LEVELS = ["?", "0", "1", "2", "3", "3.5", "4", "DMZ"];
 
@@ -58,9 +58,16 @@ function SafetyPanel({ admin }: { admin: boolean }) {
 function ScopePanel({ admin }: { admin: boolean }) {
   const qc = useQueryClient();
   const scope = useQuery({ queryKey: ["scope"], queryFn: () => apiGet<ScanScope[]>("/scope") });
-  const blank = { cidr: "", kind: "INCLUDE", profile: "OT_SENSITIVE", level: "?", label: "", authorization: "" };
+  const plugins = useQuery({ queryKey: ["plugins"], queryFn: () => apiGet<PluginInfo[]>("/plugins") });
+  const blank = { cidr: "", kind: "INCLUDE", profile: "OT_SENSITIVE", level: "?", label: "", authorization: "",
+    plugins: [] as string[] };
   const [form, setForm] = useState(blank);
-  const refresh = () => ["scope", "zones", "environment", "safety"].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
+  const togglePlugin = (list: string[], name: string) => list.includes(name) ? list.filter((x) => x !== name) : [...list, name];
+  const patchPlugins = useMutation({
+    mutationFn: ({ id, list }: { id: string; list: string[] }) => apiSend("PATCH", `/scope/${id}`, { plugins: list }),
+    onSuccess: refreshScope });
+  function refreshScope() { ["scope", "zones", "environment", "safety"].forEach((k) => qc.invalidateQueries({ queryKey: [k] })); }
+  const refresh = refreshScope;
   const add = useMutation({ mutationFn: () => apiAction<ScanScope>("/scope", form),
     onSuccess: () => { setForm(blank); refresh(); } });
   const remove = useMutation({ mutationFn: (id: string) => apiSend("DELETE", `/scope/${id}`), onSuccess: refresh });
@@ -69,16 +76,25 @@ function ScopePanel({ admin }: { admin: boolean }) {
   return (
     <Panel title="Scan scope">
       <table className="dense"><thead><tr><th>Range</th><th>Kind</th><th>Profile</th><th>Level</th><th>Label</th>
-        <th>Authorization</th><th>Added</th><th /></tr></thead>
+        <th>OT plugins</th><th>Authorization</th><th>Added</th><th /></tr></thead>
         <tbody>{scope.data?.map((e) => (
           <tr key={e.id}><td className="mono">{e.cidr}</td>
             <td>{e.kind === "INCLUDE" ? <Pill value="OK" title="include" /> : <Pill value="FAILED" title="exclude" />}{e.kind}</td>
             <td>{e.kind === "INCLUDE" ? e.profile : "—"}</td><td>{e.kind === "INCLUDE" ? e.level : "—"}</td><td>{e.label}</td>
+            <td className="small">{e.kind !== "INCLUDE" ? "—" : (plugins.data ?? []).map((pl) => {
+              const on = e.plugins.includes(pl.name);
+              const implied = !on && e.profile === "IT" && !pl.udp;
+              return (
+                <button key={pl.name} type="button" disabled={!admin || patchPlugins.isPending}
+                  className={`pchip${on ? " pchip-on" : implied ? " pchip-implied" : ""}`}
+                  title={on ? "Enabled on this range" : implied ? "On by default for IT ranges" : "Off for this range"}
+                  onClick={() => patchPlugins.mutate({ id: e.id, list: togglePlugin(e.plugins, pl.name) })}>{pl.name}</button>);
+            })}</td>
             <td className="muted small">{e.authorization}</td><td className="small">{e.createdBy}, {ago(e.createdAt)}</td>
             <td>{admin && <button className="btn btn-sm" disabled={remove.isPending}
               onClick={() => window.confirm(`Remove ${e.kind} ${e.cidr} from the scan scope?`) && remove.mutate(e.id)}>Remove</button>}</td>
           </tr>))}
-          {scope.data?.length === 0 && <tr><td colSpan={8} className="muted">No scope: nothing is scanned.</td></tr>}
+          {scope.data?.length === 0 && <tr><td colSpan={9} className="muted">No scope: nothing is scanned.</td></tr>}
         </tbody></table>
       {admin && (
         <form className="form-grid" onSubmit={submit} style={{ marginTop: 16 }}>
@@ -91,12 +107,24 @@ function ScopePanel({ admin }: { admin: boolean }) {
           <label>Default Purdue level<select value={form.level} onChange={set("level")} disabled={form.kind === "EXCLUDE"}>
             {LEVELS.map((l) => <option key={l} value={l}>{l}</option>)}</select></label>
           <label className="wide">Label<input placeholder="Line 1 controllers" value={form.label} onChange={set("label")} /></label>
+          {form.kind === "INCLUDE" && (
+            <fieldset className="full"><legend>Read-only OT plugins for this range</legend>
+              {(plugins.data ?? []).map((pl) => (
+                <label key={pl.name} className="check" title={`${pl.label} · ports ${pl.udp ? "UDP" : pl.ports.join(", ")} · risk ${pl.risk}`}>
+                  <input type="checkbox" checked={form.plugins.includes(pl.name) || (form.profile === "IT" && !pl.udp)}
+                    disabled={form.profile === "IT" && !pl.udp}
+                    onChange={() => setForm({ ...form, plugins: togglePlugin(form.plugins, pl.name) })} />
+                  {pl.label}{pl.risk !== "LOW" && <span className="pill pill-warn">{pl.risk} risk</span>}
+                </label>))}
+              <div className="hint">IT ranges: TCP plugins run by default. OT-sensitive ranges: only what is ticked here.
+                Safe mode turns all plugins off.</div>
+            </fieldset>)}
           <label className="full">Authorization (who approved scanning this range, and when)
             <input placeholder="Approved by plant manager, change ticket CHG-1234" value={form.authorization}
               onChange={set("authorization")} /></label>
           <div><button className="btn btn-primary" disabled={!form.cidr || add.isPending}>ADD TO SCOPE</button></div>
         </form>)}
-      <ErrorBox error={scope.error ?? add.error ?? remove.error} />
+      <ErrorBox error={scope.error ?? add.error ?? remove.error ?? patchPlugins.error} />
       <p className="hint">Nothing outside an INCLUDE range is ever sent a packet. Exclusions always win. Ranges wider than
         /16 are refused. Every change is audited.</p>
     </Panel>
@@ -107,16 +135,29 @@ function VaultPanel({ admin }: { admin: boolean }) {
   const qc = useQueryClient();
   const vault = useQuery({ queryKey: ["vault"], queryFn: () => apiGet<VaultProfile[]>("/vault/profiles") });
   const blank = { name: "OT-SNMPV3-RO", protocol: "SNMP", username: "", secret: "", description: "", version: "3",
-    auth: "SHA-256", priv: "AES-128", privSecret: "", port: "" };
+    auth: "SHA-256", priv: "AES-128", privSecret: "", port: "", winrmAuth: "negotiate", caPem: "", skipCertCheck: false,
+    sshAuth: "password" };
   const [form, setForm] = useState(blank);
   const set = (k: keyof typeof blank) => (e: { target: { value: string } }) => setForm({ ...form, [k]: e.target.value });
+  const DEFAULT_NAMES: Record<string, string> = { SNMP: "OT-SNMPV3-RO", WinRM: "OT-WINDOWS-READONLY", SSH: "OT-LINUX-SSH-RO",
+    MQTT: "OT-MQTT" };
+  const setProtocol = (e: { target: { value: string } }) =>
+    setForm({ ...form, protocol: e.target.value, name: DEFAULT_NAMES[e.target.value] ?? form.name });
   const save = useMutation({
     mutationFn: () => {
-      const params: Record<string, string | number> = {};
+      const params: Record<string, string | number | boolean> = {};
       if (form.protocol === "SNMP") {
         params.version = form.version;
         if (form.version === "3") { params.auth = form.auth; params.priv = form.priv; if (form.privSecret) params.privSecret = form.privSecret; }
         if (form.port) params.port = Number(form.port);
+      } else if (form.protocol === "WinRM") {
+        params.auth = form.winrmAuth;
+        if (form.port) params.port = Number(form.port);
+        if (form.caPem.trim()) params.caPem = form.caPem.trim();
+        if (form.skipCertCheck) params.skipCertCheck = true;
+      } else if (form.protocol === "SSH") {
+        if (form.port) params.port = Number(form.port);
+        if (form.sshAuth === "key") params.auth = "key";
       }
       return apiSend("PUT", `/vault/profiles/${encodeURIComponent(form.name)}`, { protocol: form.protocol,
         username: form.username || (form.version === "2c" ? "community" : ""), description: form.description,
@@ -140,13 +181,18 @@ function VaultPanel({ admin }: { admin: boolean }) {
       {admin && (
         <form className="form-grid" style={{ marginTop: 16 }} onSubmit={(e) => { e.preventDefault(); save.mutate(); }}>
           <label>Profile name<input className="mono" value={form.name} onChange={set("name")} /></label>
-          <label>Protocol<select value={form.protocol} onChange={set("protocol")}>
+          <label>Protocol<select value={form.protocol} onChange={setProtocol}>
             {["SNMP", "WinRM", "SSH", "MQTT"].map((p) => <option key={p}>{p}</option>)}</select></label>
           {snmp && <label>SNMP version<select value={form.version} onChange={set("version")}>
             <option value="3">v3 (authPriv)</option><option value="2c">v2c (community)</option></select></label>}
           {!(snmp && form.version === "2c") && <label>Username<input value={form.username} onChange={set("username")} /></label>}
-          <label>{snmp && form.version === "2c" ? "Community" : snmp ? "Auth passphrase" : "Password"}
-            <input type="password" autoComplete="new-password" placeholder="(unchanged if empty)" value={form.secret} onChange={set("secret")} /></label>
+          {form.protocol === "SSH" && form.sshAuth === "key"
+            ? <label className="full">Private key (OpenSSH or PEM)<textarea className="mono" rows={4}
+                placeholder="(unchanged if empty)" value={form.secret}
+                onChange={(e) => setForm({ ...form, secret: e.target.value })} /></label>
+            : <label>{snmp && form.version === "2c" ? "Community" : snmp ? "Auth passphrase" : "Password"}
+                <input type="password" autoComplete="new-password" placeholder="(unchanged if empty)" value={form.secret}
+                  onChange={set("secret")} /></label>}
           {snmp && form.version === "3" && <>
             <label>Auth protocol<select value={form.auth} onChange={set("auth")}>
               {["SHA-256", "SHA-512", "SHA", "MD5"].map((a) => <option key={a}>{a}</option>)}</select></label>
@@ -155,6 +201,21 @@ function VaultPanel({ admin }: { admin: boolean }) {
             <label>Privacy passphrase<input type="password" autoComplete="new-password" placeholder="(same as auth if empty)"
               value={form.privSecret} onChange={set("privSecret")} /></label></>}
           {snmp && <label>UDP port<input className="narrow" placeholder="161" value={form.port} onChange={set("port")} /></label>}
+          {form.protocol === "WinRM" && <>
+            <label>Authentication<select value={form.winrmAuth} onChange={set("winrmAuth")}>
+              <option value="negotiate">Negotiate (Kerberos, else NTLM)</option><option value="ntlm">NTLM</option>
+              <option value="kerberos">Kerberos</option></select></label>
+            <label>Port<input className="narrow" placeholder="5986 (HTTPS)" value={form.port} onChange={set("port")} /></label>
+            <label className="full">CA certificate that signed the hosts' WinRM certificates (PEM, optional)
+              <textarea className="mono" rows={3} placeholder="-----BEGIN CERTIFICATE-----" value={form.caPem}
+                onChange={(e) => setForm({ ...form, caPem: e.target.value })} /></label>
+            <label className="check full"><input type="checkbox" checked={form.skipCertCheck}
+              onChange={(e) => setForm({ ...form, skipCertCheck: e.target.checked })} />
+              Skip certificate validation (lab only: shown as "unverified" on every probe)</label></>}
+          {form.protocol === "SSH" && <>
+            <label>Login with<select value={form.sshAuth} onChange={set("sshAuth")}>
+              <option value="password">Password</option><option value="key">Private key</option></select></label>
+            <label>Port<input className="narrow" placeholder="22" value={form.port} onChange={set("port")} /></label></>}
           <label className="wide">Description<input value={form.description} onChange={set("description")} /></label>
           <div><button className="btn btn-primary" disabled={!form.name || save.isPending}>SAVE PROFILE</button></div>
         </form>)}

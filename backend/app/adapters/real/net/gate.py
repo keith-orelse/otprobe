@@ -32,7 +32,7 @@ class Profile:
     host_concurrency: int    # parallel operations to one host
     host_gap_sec: float      # minimum time between operations to one host
     retries: int
-    plugins: bool            # OT protocol plugins allowed at all
+    plugins: bool            # OT protocol plugins on by default (otherwise only those listed on the scope entry)
 
 
 PROFILES = {
@@ -168,9 +168,15 @@ class NetworkGate:
         entry = max(matches, key=lambda e: e.network.prefixlen)
         return Decision(True, "ok", entry, self.profile_of(entry))
 
-    def plugin_allowed(self, ip: str, plugin: str) -> bool:
+    def plugin_allowed(self, ip: str, plugin: str, explicit_only: bool = False) -> bool:
+        """Safe mode: never. IT ranges: every plugin, unless ``explicit_only`` (UDP plugins, which have no open port
+        to justify them). OT-sensitive ranges: only plugins listed on the scope entry."""
         d = self.decide(ip)
-        return d.allowed and d.profile.plugins and plugin in d.entry.plugins
+        if not d.allowed or self.safe_mode:
+            return False
+        if plugin in d.entry.plugins:
+            return True
+        return d.profile.plugins and not explicit_only
 
     # ---- the permit ------------------------------------------------------------------------------------------------
 

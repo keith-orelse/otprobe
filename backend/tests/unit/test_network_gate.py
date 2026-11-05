@@ -71,8 +71,15 @@ def test_safe_mode_forces_ot_sensitive_and_disables_plugins():
     g = gate([inc("10.0.0.0/24", "IT", plugins=["modbus"])], safe_mode=True)
     assert g.decide("10.0.0.5").profile.name == "OT_SENSITIVE"
     assert not g.plugin_allowed("10.0.0.5", "modbus")
-    g.load([inc("10.0.0.0/24", "IT", plugins=["modbus"])], armed=True, safe_mode=False)
-    assert g.plugin_allowed("10.0.0.5", "modbus") and not g.plugin_allowed("10.0.0.5", "s7")
+
+
+def test_plugin_rules_per_profile():
+    g = gate([inc("10.0.0.0/24", "IT"), inc("10.0.1.0/24", "OT_SENSITIVE", plugins=["modbus", "bacnet"])])
+    assert g.plugin_allowed("10.0.0.5", "s7")                                  # IT: on by default
+    assert not g.plugin_allowed("10.0.0.5", "bacnet", explicit_only=True)     # UDP needs explicit opt-in
+    assert g.plugin_allowed("10.0.1.5", "modbus") and not g.plugin_allowed("10.0.1.5", "s7")   # OT: listed only
+    assert g.plugin_allowed("10.0.1.5", "bacnet", explicit_only=True)
+    assert not g.plugin_allowed("10.0.9.5", "modbus")                         # out of scope
 
 
 async def test_kill_switch_refuses_new_and_waiting_operations():

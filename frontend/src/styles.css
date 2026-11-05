@@ -251,6 +251,16 @@ input.narrow { min-width: 0; width: 120px; }
 .field { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; color: var(--text-secondary); font-size: 12.5px;
   font-weight: 600; }
 .form-grid .full { grid-column: 1 / -1; }
+.form-grid label.check { flex-direction: row; align-items: center; gap: 8px; font-weight: 500; color: var(--text-primary);
+  display: inline-flex; margin: 2px 18px 2px 0; }
+.form-grid fieldset .hint { margin-top: 6px; }
+.pchip { display: inline-block; margin: 1px 3px 1px 0; padding: 2px 8px; border-radius: 10px; font-size: 11px;
+  border: 1px solid var(--border-color-solid); background: #fff; color: var(--text-tertiary); cursor: pointer; }
+.pchip:disabled { cursor: default; }
+.pchip-on { background: #e7f6ec; border-color: #9fd6b1; color: #17663a; font-weight: 600; }
+.pchip-implied { background: #f2f6fb; color: var(--text-secondary); }
+textarea { width: 100%; box-sizing: border-box; border: 1px solid var(--border-color-solid); border-radius: 10px;
+  padding: 8px 10px; font-size: 12px; background: #fff; }
 .kv { display: grid; grid-template-columns: max-content 1fr; gap: 6px 18px; font-size: 13.5px; margin-bottom: 12px; }
 .kv dt { color: var(--text-tertiary); font-weight: 600; }
 .kv dd { margin: 0; }

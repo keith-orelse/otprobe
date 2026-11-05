@@ -176,3 +176,5 @@ export interface SafetyView { live: boolean; armed: boolean; safeMode: boolean; 
   changedAt: string | null; reason: string; scopeConfigured: boolean; includes: string[]; excludes: string[];
   runningWorkflows: string[]; traffic: { sent: number; byOperation: Record<string, number>;
     blocked: Record<string, number>; rateLimitedSec: number } | null }
+
+export interface PluginInfo { name: string; label: string; protocol: string; ports: number[]; risk: string; udp: boolean }
