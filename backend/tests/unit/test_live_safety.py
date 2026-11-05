@@ -14,6 +14,7 @@ NET_DIR = APP_DIR / "adapters" / "real" / "net"
 NETWORK_MODULES = {"socket", "subprocess", "scapy", "pysnmp", "winrm", "pypsrp", "paramiko", "asyncssh", "icmplib",
                    "requests", "httpx", "urllib", "aiohttp", "paho", "aiomqtt", "ssl", "pymodbus", "asyncua",
                    "bacpypes3"}
+PURE_SUBMODULES = {"urllib.parse"}   # string parsing only, no I/O
 NETWORK_CALLS = {"open_connection", "create_connection", "create_datagram_endpoint", "create_subprocess_exec",
                  "create_subprocess_shell", "start_server", "open_unix_connection"}
 
@@ -26,7 +27,7 @@ def _violations(path: Path) -> list[str]:
             names = [a.name for a in node.names]
         elif isinstance(node, ast.ImportFrom) and node.module:
             names = [node.module]
-        out += [f"import {n}" for n in names if n.split(".")[0] in NETWORK_MODULES]
+        out += [f"import {n}" for n in names if n.split(".")[0] in NETWORK_MODULES and n not in PURE_SUBMODULES]
         if isinstance(node, ast.Attribute) and node.attr in NETWORK_CALLS:
             out.append(f"call {node.attr}")
     return out

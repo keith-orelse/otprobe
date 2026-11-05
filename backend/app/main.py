@@ -14,12 +14,14 @@ from pathlib import Path
 from typing import Callable, Iterable
 
 from fastapi import FastAPI
+from sqlalchemy import select
 
+from app.adapters.base import Protocol
 from app.adapters.registry import AdapterRegistry, parse_overrides
 from app.adapters.vault import LocalCredentialVault
 from app.api.v1 import router as api_v1
 from app.context import AppContext
-from app.core import events
+from app.core import audit, events
 from app.core.config import Settings
 from app.core.correlation import CorrelationMiddleware
 from app.core.crypto import fernet_for, live_vault_key
@@ -29,8 +31,9 @@ from app.core.events import EventHub
 from app.core.migrations import upgrade
 from app.core.pacing import Pacer
 from app.core.security import StreamTickets
+from app.models import AgentBuild
 from app.rules.book import RuleBook
-from app.services import safety
+from app.services import agent_builds, safety
 from app.services.agents import run_watchdog
 from app.services.assessments import sync_policies
 from app.services.bootstrap import seed_config, seed_live_users, seed_trust
@@ -65,7 +68,8 @@ def _simulated_parts(settings: Settings, db: Database, fernet, registry: Adapter
 
 
 def _live_parts(settings: Settings, db: Database, registry: AdapterRegistry) -> dict:
-    from app.adapters.real import NetworkGate, UnavailableTransfer, register_real
+    from app.adapters.real import NetworkGate, register_real
+    from app.adapters.real.winrm import RealPackageTransfer
 
     with db.session() as s:
         for username, password in seed_live_users(s, settings):
@@ -73,7 +77,17 @@ def _live_parts(settings: Settings, db: Database, registry: AdapterRegistry) -> 
                         username, password)
     gate = NetworkGate(max_pps=settings.scan_max_pps)
     register_real(registry, gate)
-    return {"transfer": UnavailableTransfer(), "sim_control": None, "gate": gate, "extras": {}}
+
+    def resolve_build(package_id: str) -> str | None:
+        """Local file of the verified agent build behind a package id (agent-<version>-<build id>)."""
+        with db.session() as s:
+            for b in s.scalars(select(AgentBuild)):
+                if agent_builds.package_id(b.version, b.build_id) == package_id:
+                    return b.path
+        return None
+
+    transfer = RealPackageTransfer(lambda: registry.get(Protocol.WINRM), resolve_build)
+    return {"transfer": transfer, "sim_control": None, "gate": gate, "extras": {}}
 
 
 def build_context(settings: Settings, plugins: Iterable[AdapterPlugin] = ()) -> AppContext:
@@ -102,6 +116,8 @@ def build_context(settings: Settings, plugins: Iterable[AdapterPlugin] = ()) -> 
     with db.session() as s:
         sync_policies(s, ctx.rules)
         safety.push_to_gate(ctx, s)
+        if settings.live:
+            agent_builds.rescan(ctx, s, audit.system("agent-builds"))
     registry.validate()   # fails fast when a required protocol has no adapter in the selected mode
     interrupted = recover_interrupted(db)
     if interrupted:

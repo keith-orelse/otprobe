@@ -10,6 +10,9 @@ from typing import Any, AsyncIterator, Mapping
 from app.adapters.base import (
     AdapterResult,
     DiscoveredHost,
+    PackageRef,
+    PackageTransfer,
+    ProgressCallback,
     Protocol,
     Query,
     RemoteOperation,
@@ -18,6 +21,7 @@ from app.adapters.base import (
     Stage,
     StageCallback,
     Target,
+    TransferResult,
     WinRmAdapter,
     WmiAdapter,
 )
@@ -117,6 +121,10 @@ MAPPERS = {"os": map_os, "hardware": map_hardware, "firewall": map_firewall, "an
            "network": map_network}
 
 
+def _win(path: str) -> str:
+    return str(path).replace("/", "\\").rstrip("\\")
+
+
 def _port(target: Target) -> int:
     params = target.credential.params if target.credential else {}
     return int(target.port or params.get("port") or 5986)
@@ -181,18 +189,19 @@ class RealWinRmAdapter(RealAdapterMixin, WinRmAdapter):
         if target is None:
             return self.result(session.target, ResultStatus.ERROR, error_code="NO_SESSION",
                                error_detail="WinRM session is closed")
-        script = READ_ONLY_OPS.get(op)
-        if script is None:
-            return self.result(session.target, ResultStatus.NOT_SUPPORTED, error_code="NOT_AVAILABLE",
-                               error_detail=f"{op.value} changes the host: live agent deployment arrives in phase L4")
         try:
-            reply = await winrm.run(self.gate, target.address, _port(target), target.credential, script,
-                                    min(target.timeout_sec, 5.0), dict(params))
+            if op in READ_ONLY_OPS:
+                return await self._query(session, target, op, params)
+            return await self._deploy_op(session, target, op, params)
         except GateBlocked as exc:
             return self.blocked(session.target, exc)
-        except ValueError as exc:
+        except (ValueError, KeyError) as exc:
             return self.result(session.target, ResultStatus.ERROR, error_code="INVALID_PARAMETER",
-                               error_detail=str(exc))
+                               error_detail=f"invalid or missing parameter: {exc}")
+
+    async def _query(self, session, target, op, params) -> AdapterResult:
+        reply = await winrm.run(self.gate, target.address, _port(target), target.credential, READ_ONLY_OPS[op],
+                                min(target.timeout_sec, 5.0), dict(params))
         if reply.status != "OK":
             return self.result(session.target, STATUS[reply.status], error_code=reply.status, error_detail=reply.detail)
         out = reply.output.strip()
@@ -205,12 +214,71 @@ class RealWinRmAdapter(RealAdapterMixin, WinRmAdapter):
         if op == RemoteOperation.QUERY_AGENT_INSTALLED:
             return self.result(session.target, ResultStatus.OK, raw={"installed": out.lower() == "true"})
         if op == RemoteOperation.QUERY_SERVICE:
-            return self.result(session.target, ResultStatus.OK, raw={"service": winrm.parse_json(out)})
+            svc = winrm.parse_json(out)
+            if svc:
+                svc = {"name": svc.get("name"), "state": str(svc.get("state", "")).lower(),
+                       "start_type": str(svc.get("startType", "")).lower()}
+            return self.result(session.target, ResultStatus.OK, raw={"service": svc or None})
         conn = winrm.parse_json(out) or {}
         if not conn.get("TcpTestSucceeded"):
             return self.result(session.target, ResultStatus.ERROR, raw=conn, error_code="TCP_FAILED",
                                error_detail=f"TcpTestSucceeded=False to {params.get('server')}:{params.get('port')}")
         return self.result(session.target, ResultStatus.OK, raw=conn)
+
+    async def _script(self, target: Target, name: str, params: dict) -> winrm.WinRmReply:
+        return await winrm.run(self.gate, target.address, _port(target), target.credential, name,
+                               min(target.timeout_sec * 6, 120.0), params, deploy=True)
+
+    async def _deploy_op(self, session, target, op, params) -> AdapterResult:
+        """Operations that change the host: agent install, service start/stop, uninstall, staging clean-up."""
+        ip = session.target
+        if op in (RemoteOperation.START_SERVICE, RemoteOperation.STOP_SERVICE) and \
+                params.get("name", "OTProbeAgent") != "OTProbeAgent":
+            raise ValueError("only the OTProbeAgent service can be started or stopped")
+        if op == RemoteOperation.VERIFY_FILE_HASH:
+            reply = await self._script(target, "verify_hash", {"path": _win(params["path"])})
+            actual, expected = reply.output.strip().lower(), str(params["sha256"]).lower()
+            raw = {"expected": expected, "actual": actual, "algorithm": "SHA256"}
+            if reply.status != "OK" or reply.errors or actual != expected:
+                return self.result(ip, ResultStatus.ERROR, raw=raw, error_code="HASH_MISMATCH",
+                                   error_detail=f"Package hash mismatch: expected {expected[:4]}…{expected[-4:]}, "
+                                                f"got {actual[:4] or '?'}…{actual[-4:]}")
+            return self.result(ip, ResultStatus.OK, raw=raw)
+        if op == RemoteOperation.INSTALL_AGENT:
+            reply = await self._script(target, "install", {
+                "path": _win(params["path"]), "sha256": params["sha256"], "token": params["enrollment_token"],
+                "server_url": params["server_url"], "ca_sha256": params.get("ca_sha256", ""),
+                "deployment_id": params["deployment_id"], "profile": params["profile"]})
+            if reply.status != "OK" or reply.errors:
+                text = "; ".join(reply.errors) or reply.detail
+                code = "HASH_MISMATCH" if "HASH_MISMATCH" in text else "INSTALL_FAILED"
+                return self.result(ip, ResultStatus.ERROR, error_code=code, error_detail=text[:500])
+            return self.result(ip, ResultStatus.OK, raw=winrm.parse_json(reply.output) or {})
+        name = {RemoteOperation.START_SERVICE: "start_service", RemoteOperation.STOP_SERVICE: "stop_service",
+                RemoteOperation.UNINSTALL_AGENT: "uninstall"}.get(op)
+        if name:
+            reply = await self._script(target, name, {})
+            if reply.status != "OK" or reply.errors:
+                code = {"uninstall": "UNINSTALL_FAILED", "start_service": "SERVICE_START_FAILED"}.get(name, "ERROR")
+                return self.result(ip, ResultStatus.ERROR, error_code=code,
+                                   error_detail=("; ".join(reply.errors) or reply.detail)[:500])
+            return self.result(ip, ResultStatus.OK, raw={"output": reply.output.strip()})
+        if op == RemoteOperation.REMOVE_FILES:
+            for path in params.get("paths", []):
+                await self._script(target, "remove_staging", {"path": _win(path)})
+            return self.result(ip, ResultStatus.OK)
+        return self.result(ip, ResultStatus.NOT_SUPPORTED, error_code="NOT_AVAILABLE",
+                           error_detail=f"{op.value} is not used by the Go agent")
+
+    async def copy(self, session: RemoteSession, local: str, remote: str) -> winrm.WinRmReply:
+        target = self._sessions.get(session.session_id)
+        if target is None:
+            return winrm.WinRmReply("ERROR", detail="WinRM session is closed")
+        made = await self._script(target, "make_staging", {})
+        if made.status != "OK":
+            return made
+        return await winrm.copy_file(self.gate, target.address, _port(target), target.credential, local,
+                                     _win(remote), min(target.timeout_sec, 10.0))
 
     async def close_session(self, session: RemoteSession) -> None:
         self._sessions.pop(session.session_id, None)
@@ -265,3 +333,35 @@ class RealWmiAdapter(RealAdapterMixin, WmiAdapter):
 
     async def get_device_info(self, target: Target) -> AdapterResult:
         return await self.probe(target, Query(["os", "hardware"]))
+
+
+class RealPackageTransfer(PackageTransfer):
+    """Copies a verified agent build into the host's staging folder over the open WinRM session (PUSH mode).
+    ``resolve`` maps a package id to the local file of its verified build (wired in app.main)."""
+
+    def __init__(self, winrm, resolve) -> None:
+        """``winrm``: a callable returning the WinRM adapter in use (looked up per transfer), or the adapter."""
+        self._winrm, self.resolve = winrm, resolve
+
+    @property
+    def winrm(self):
+        return self._winrm() if callable(self._winrm) else self._winrm
+
+    async def transfer(self, session: RemoteSession, package: PackageRef,
+                       on_progress: ProgressCallback | None = None) -> TransferResult:
+        local = self.resolve(package.package_id)
+        if not local:
+            return TransferResult(ResultStatus.ERROR, error_code="BUILD_NOT_FOUND",
+                                  error_detail=f"No verified agent build for package {package.package_id}")
+        remote = f"{winrm.STAGING}\\{local.rsplit('/', 1)[-1]}".replace("\\\\", "\\")
+        if on_progress is not None:
+            await on_progress(0.0)
+        try:
+            reply = await self.winrm.copy(session, local, remote)
+        except GateBlocked as exc:
+            return TransferResult(ResultStatus.BLOCKED, error_code="BLOCKED", error_detail=str(exc))
+        if reply.status != "OK":
+            return TransferResult(STATUS[reply.status], error_code=f"COPY_{reply.status}", error_detail=reply.detail)
+        if on_progress is not None:
+            await on_progress(1.0)
+        return TransferResult(ResultStatus.OK, remote_path=reply.output, bytes_transferred=package.size_bytes)

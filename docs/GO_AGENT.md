@@ -273,3 +273,18 @@ in a task or in the config can change which commands run.
 | `AGT-HEALTH-001` | `agent.health == 'healthy'` | MEDIUM |
 
 The rule engine, scoring formula and drift logic do not change ([RULES.md](RULES.md)).
+
+## 8. Implementation notes (phase L4)
+
+- **Windows collectors** run fixed PowerShell scripts compiled into the binary (the same shapes as the agentless
+  WinRM scripts), plus `net accounts`, `secedit`, `auditpol` and registry reads. They need Windows PowerShell 3.0+.
+  On a stock Windows 7 / 2008 R2 (PowerShell 2.0) the legacy build enrolls, heartbeats and reports agent health, but
+  most collectors report an error and their rules stay UNKNOWN. Native API collectors for those systems are future work.
+- **Transfer mode**: the server copies the verified binary into `C:\ProgramData\OTProbe\staging` over the WinRM
+  session (PUSH), then runs the install script, which re-checks the SHA-256 before installing. PULL (the host
+  downloads) is used only by the manual one-liner, which is not built yet (moved to L6).
+- **Credential at rest (Windows)**: `C:\ProgramData\OTProbe\agent.json` is restricted to SYSTEM and Administrators
+  by ACL. DPAPI encryption of the credential, as planned in §4, is not done yet.
+- **Linux deployment over SSH**: the Linux builds and collectors exist and are unit-tested, but OTProbe does not yet
+  deploy them over SSH (no Linux test host); moved to L6 together with `install.sh`.
+- **macOS**: a small collector set used for development; no macOS policy and no service installation.

@@ -14,6 +14,7 @@ from app.core import audit, events
 from app.core.audit import system
 from app.core.clock import utcnow
 from app.core.correlation import get_correlation_id
+from app.engines.remote import profile_port
 from app.models import Agent, AgentTask, AssessmentRun, Asset, Removal
 from app.workflow.machine import AGENT, ASSESSMENT, REMOVAL, TASK
 from app.workflow.steps import StepTracker
@@ -102,10 +103,11 @@ class RemovalEngine:
         tracker.ok("STOP_ASSESSMENTS", f"{cancelled} task(s) cancelled; scheduler skips agents being removed")
 
         winrm = ctx.registry.get(Protocol.WINRM)
-        tracker.start("CONNECT", f"WinRM HTTPS {ip}:5986")
+        port = await profile_port(ctx, "OT-WINDOWS-INSTALLER")
+        tracker.start("CONNECT", f"WinRM {ip}:{port}")
         cred = await ctx.vault.resolve("OT-WINDOWS-INSTALLER", purpose=f"removal {removal_id}",
                                        correlation_id=get_correlation_id())
-        res, session = await winrm.open_session(Target(ip, port=5986, credential=cred))
+        res, session = await winrm.open_session(Target(ip, port=port, credential=cred))
         if session is None:
             raise StepFailed("CONNECT", f"WINRM_{res.status.value}", res.error_detail or res.status.value)
         tracker.ok("CONNECT", f"Session created as {cred.username}")
@@ -121,7 +123,7 @@ class RemovalEngine:
         r = await winrm.execute(session, RemoteOperation.STOP_SERVICE, {"name": "OTProbeAgent"})
         tracker.ok("STOP_AGENT", "Service stopped" if r.ok else "Service not present (already stopped)")
 
-        tracker.start("UNINSTALL", "msiexec /x ProbeAgent /qn")
+        tracker.start("UNINSTALL", "otprobe-agent uninstall; removing program and data folders")
         r = await winrm.execute(session, RemoteOperation.UNINSTALL_AGENT, {})
         if not r.ok:
             raise StepFailed("UNINSTALL", r.error_code or "UNINSTALL_FAILED", r.error_detail or "Uninstall failed")

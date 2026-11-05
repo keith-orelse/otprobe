@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import JSON, Boolean, String, Text
+from sqlalchemy import JSON, Boolean, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.clock import utcnow
@@ -38,3 +38,22 @@ class SafetyState(Base):
     changed_by: Mapped[str | None] = mapped_column(String(64))
     changed_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
     reason: Mapped[str] = mapped_column(Text, default="")
+
+
+class AgentBuild(Base):
+    """A verified agent binary from a signed release (docs/GO_AGENT.md §1). Only builds whose release signature and
+    file hash both verified are ever stored."""
+
+    __tablename__ = "agent_builds"
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)          # "<version>/<build id>"
+    version: Mapped[str] = mapped_column(String(32), index=True)
+    build_id: Mapped[str] = mapped_column(String(48))                      # windows-amd64, linux-legacy-386, ...
+    os: Mapped[str] = mapped_column(String(16))
+    arch: Mapped[str] = mapped_column(String(16))
+    variant: Mapped[str] = mapped_column(String(16))                       # modern | legacy
+    file: Mapped[str] = mapped_column(String(128))
+    path: Mapped[str] = mapped_column(Text)
+    sha256: Mapped[str] = mapped_column(String(64))
+    size_bytes: Mapped[int] = mapped_column(Integer)
+    min_os: Mapped[str] = mapped_column(String(64), default="")
+    registered_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow)

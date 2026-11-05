@@ -58,6 +58,9 @@ def enroll(ctx: AppContext, session: Session, req: schemas.EnrollRequest) -> tup
     tok.used_at = now
     agent.credential_hash, agent.credential_prefix = cred_hash, credential[:8]
     agent.host_fingerprint, agent.enrolled_at, agent.version = req.host_fingerprint, now, req.agent_version
+    if req.os:
+        agent.platform = f"{req.os}/{req.arch} {req.variant or 'modern'}"
+        agent.profile = req.profile
     audit.record(session, Actor("AGENT", f"agent:{agent.id[:8]}", agent.id), "AGENT_CREDENTIAL_ISSUED", "agent",
                  agent.id, {"deploymentId": dep.id, "tokenId": tok.id, "credentialPrefix": agent.credential_prefix,
                             "hostname": req.hostname})

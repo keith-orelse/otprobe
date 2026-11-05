@@ -13,9 +13,10 @@ from app.core.clock import utcnow
 from app.core.correlation import get_correlation_id
 from app.core.errors import ProblemError, not_found
 from app.core.principal import CurrentUser
+from app.engines.remote import profile_port
 from app.engines.removal.engine import RemovalEngine
 from app.models import Agent, Approval, Asset, Removal, WorkflowStep
-from app.services import approvals
+from app.services import approvals, safety
 from app.services.common import paginate
 from app.workflow.machine import AGENT, APPROVAL, REMOVAL
 
@@ -104,6 +105,7 @@ def start(ctx: AppContext, session: Session, removal_id: str, user: CurrentUser,
         raise ProblemError(403 if "Only" in act.reason else 409,
                            "forbidden" if "Only" in act.reason else "invalid-state-transition",
                            "Action not available", act.reason)
+    safety.ensure_can_scan(ctx, session, [session.get(Asset, rem.asset_id).ip])
     agent = session.get(Agent, rem.agent_id)
     if agent.status != "REMOVING":
         AGENT.transition(session, agent, "REMOVING", user.actor, details={"removalId": rem.id})
@@ -133,10 +135,12 @@ async def restart_agent(ctx: AppContext, agent_id: str, user: CurrentUser) -> di
         if not act.enabled:
             raise ProblemError(409, "restart-not-possible", "Restart not possible", act.reason)
         ip = s.get(Asset, agent.asset_id).ip
+        safety.ensure_can_scan(ctx, s, [ip])
     winrm = ctx.registry.get(Protocol.WINRM)
     cred = await ctx.vault.resolve("OT-WINDOWS-INSTALLER", purpose=f"restart agent {agent_id}",
                                    correlation_id=get_correlation_id())
-    res, session = await winrm.open_session(Target(ip, port=5986, credential=cred))
+    res, session = await winrm.open_session(Target(ip, port=await profile_port(ctx, "OT-WINDOWS-INSTALLER"),
+                                                    credential=cred))
     if session is None:
         raise ProblemError(502, "winrm-failed", "Could not reach the host over WinRM", res.error_detail)
     try:

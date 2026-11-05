@@ -86,14 +86,32 @@ def test_mapping_server_without_defender_and_single_element_arrays():
     assert net["network.connections"] == [{"remote_ip": "10.20.2.10", "remote_port": 102, "protocol": "tcp"}]
 
 
-async def test_operations_that_change_a_host_are_refused_without_sending():
+async def test_host_changing_operations_refuse_unsafe_parameters_without_sending():
     adapter = RealWinRmAdapter(gate())
     adapter._sessions["s1"] = Target("127.0.0.1", port=5986, credential=Credential("p", "u", "x"))
-    for op in (RemoteOperation.INSTALL_AGENT, RemoteOperation.STOP_SERVICE, RemoteOperation.REMOVE_FILES,
-               RemoteOperation.UNINSTALL_AGENT):
-        res = await adapter.execute(RemoteSession("s1", "127.0.0.1", []), op, {})
-        assert res.status == ResultStatus.NOT_SUPPORTED and "phase L4" in res.error_detail
+    session = RemoteSession("s1", "127.0.0.1", [])
+    good = {"path": "C:/ProgramData/OTProbe/staging/otprobe-agent-1.0.0-windows-amd64.exe", "sha256": "a" * 64,
+            "enrollment_token": "enr_" + "x" * 43, "server_url": "https://otprobe.plant.local:8443",
+            "ca_sha256": "b" * 64, "deployment_id": "01a1a64c-fac4-7082-aee2-5d56d816e838",
+            "profile": "windows-workstation"}
+    for op, params in [
+        (RemoteOperation.INSTALL_AGENT, {**good, "path": "C:/Windows/System32/evil.exe"}),     # outside staging
+        (RemoteOperation.INSTALL_AGENT, {**good, "server_url": "https://x'; Remove-Item C:\\ -Recurse; '"}),
+        (RemoteOperation.INSTALL_AGENT, {**good, "server_url": "http://plain.example"}),       # TLS only
+        (RemoteOperation.INSTALL_AGENT, {k: v for k, v in good.items() if k != "path"}),       # missing
+        (RemoteOperation.VERIFY_FILE_HASH, {"path": "C:/Users/Public/x.exe", "sha256": "a" * 64}),
+        (RemoteOperation.REMOVE_FILES, {"paths": ["C:/Windows"]}),
+        (RemoteOperation.STOP_SERVICE, {"name": "WinDefend"}),                                  # other services
+    ]:
+        res = await adapter.execute(session, op, params)
+        assert res.status == ResultStatus.ERROR and res.error_code == "INVALID_PARAMETER", (op, res)
     assert adapter.gate.totals.as_dict()["sent"] == 0
+
+
+def test_deploy_scripts_are_separate_from_probe_scripts():
+    assert not set(winrm.SCRIPTS) & set(winrm.DEPLOY_SCRIPTS)
+    from app.adapters.real.winrm import MAPPERS, READ_ONLY_OPS
+    assert set(MAPPERS) | set(READ_ONLY_OPS.values()) <= set(winrm.SCRIPTS)   # probes use read-only scripts only
 
 
 def free_port() -> int:
@@ -221,3 +239,13 @@ async def test_certificate_name_is_shown_when_validation_is_skipped(tls_server):
     res, session, seen, _ = await stages_of(cred, tls_server["port"])
     tls = next(s for s in seen if s[0] == "TLS_VALIDATED")
     assert tls[1] == "OK" and "CN=eng-ws-07.plant.local" in tls[2] and "validation skipped" in tls[2]
+
+
+def test_deploy_scripts_render_clean_windows_paths():
+    params = {"path": "C:\\ProgramData\\OTProbe\\staging\\otprobe-agent-1.0.0-windows-amd64.exe", "sha256": "a" * 64,
+              "token": "enr_" + "x" * 43, "server_url": "https://otprobe.plant.local:8443", "ca_sha256": "b" * 64,
+              "deployment_id": "01a1a64c-fac4-7082-aee2-5d56d816e838", "profile": "windows-workstation"}
+    for name in winrm.DEPLOY_SCRIPTS:
+        script = winrm.render_deploy(name, params)
+        assert "\\\\" not in script, name                                  # no doubled backslashes in paths
+        assert "{" + "path}" not in script and "{" + "token}" not in script     # every placeholder filled

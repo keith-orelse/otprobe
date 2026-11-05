@@ -90,6 +90,8 @@ export function AgentDetail() {
             <tr><th>Missed heartbeats</th><td>{ag.missedHeartbeats} (interval {ag.heartbeatIntervalSec} s)</td></tr>
             <tr><th>Version</th><td>{ag.version}</td></tr>
             <tr><th>Credential</th><td className="mono">{ag.credentialPrefix ? `${ag.credentialPrefix}… (stored hashed)` : "—"}</td></tr>
+            {ag.platform && <tr><th>Platform</th><td className="mono">{ag.platform}</td></tr>}
+            {ag.profile && <tr><th>Profile</th><td className="mono">{ag.profile}</td></tr>}
             <tr><th>Installed</th><td>{time(ag.installedAt)}</td></tr>
             <tr><th>Enrolled</th><td>{time(ag.enrolledAt)}</td></tr>
             <tr><th>Revoked</th><td>{time(ag.revokedAt)}</td></tr>

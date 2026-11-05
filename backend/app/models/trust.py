@@ -113,6 +113,8 @@ class Agent(Base):
     credential_hash: Mapped[str | None] = mapped_column(String(64), unique=True)
     credential_prefix: Mapped[str | None] = mapped_column(String(16))
     host_fingerprint: Mapped[str | None] = mapped_column(String(128))
+    platform: Mapped[str | None] = mapped_column(String(48))   # "windows/amd64 modern", reported at enrollment
+    profile: Mapped[str | None] = mapped_column(String(48))    # windows-workstation, linux-host, ...
     installed_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow)
     enrolled_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
     last_heartbeat_at: Mapped[datetime | None] = mapped_column(UtcDateTime)

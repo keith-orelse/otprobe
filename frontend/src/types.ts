@@ -98,7 +98,8 @@ export interface Deployment { id: string; assetId: string; assetName: string | n
   finishedAt: string | null; actions: Record<string, ActionState> }
 
 export interface Agent { id: string; assetId: string; assetName: string | null; deploymentId: string; status: string;
-  version: string; credentialPrefix: string | null; installedAt: string; enrolledAt: string | null;
+  version: string; credentialPrefix: string | null; platform: string | null; profile: string | null;
+  installedAt: string; enrolledAt: string | null;
   lastHeartbeatAt: string | null; secondsSinceHeartbeat: number | null; missedHeartbeats: number;
   heartbeatIntervalSec: number; revokedAt: string | null; removedAt: string | null;
   actions: Record<string, ActionState>; removalId: string | null }
@@ -178,3 +179,6 @@ export interface SafetyView { live: boolean; armed: boolean; safeMode: boolean; 
     blocked: Record<string, number>; rateLimitedSec: number } | null }
 
 export interface PluginInfo { name: string; label: string; protocol: string; ports: number[]; risk: string; udp: boolean }
+
+export interface AgentBuild { id: string; version: string; buildId: string; os: string; arch: string; variant: string;
+  file: string; sha256: string; sizeBytes: number; minOs: string; registeredAt: string }

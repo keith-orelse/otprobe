@@ -5,7 +5,7 @@ from app.api.deps import admin_only, any_user, get_ctx, operator_or_admin
 from app.context import AppContext
 from app.core.idempotency import Idempotency, require_idempotency
 from app.core.principal import CurrentUser
-from app.services import safety
+from app.services import agent_builds, safety
 
 router = APIRouter(tags=["safety"])
 
@@ -73,3 +73,17 @@ async def safe_mode(req: schemas.SafeModeChange, user: CurrentUser = Depends(adm
 async def plugins(user: CurrentUser = Depends(any_user), ctx: AppContext = Depends(get_ctx)):
     return [schemas.PluginInfo(name=p.name, label=p.display_label, protocol=p.protocol.value, ports=list(p.ports),
                                risk=p.risk, udp=not p.ports) for p in ctx.registry.plugins()]
+
+
+@router.get("/agent-builds", response_model=list[schemas.AgentBuild], tags=["agents"],
+            summary="Agent binaries from signed releases (only verified builds are listed)")
+async def list_agent_builds(user: CurrentUser = Depends(any_user), ctx: AppContext = Depends(get_ctx)):
+    with ctx.db.session() as s:
+        return agent_builds.list_builds(s)
+
+
+@router.post("/agent-builds/rescan", response_model=schemas.AgentBuildScan, tags=["agents"],
+             summary="Re-read the release folder and verify signatures (admin)")
+async def rescan_agent_builds(user: CurrentUser = Depends(admin_only), ctx: AppContext = Depends(get_ctx)):
+    with ctx.db.session() as s:
+        return agent_builds.rescan(ctx, s, user.actor)

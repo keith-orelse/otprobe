@@ -20,6 +20,7 @@ from app.core.correlation import get_correlation_id
 from app.core.security import opaque_token
 from app.engines.inventory import effective_fields
 from app.engines.protocol_events import winrm_event
+from app.engines.remote import agent_profile, profile_port, server_endpoint, server_url
 from app.models import Agent, Asset, Deployment, EnrollmentToken, Package, PrecheckResult, WorkflowStep
 from app.workflow.machine import AGENT, DEPLOYMENT
 from app.workflow.steps import StepTracker
@@ -66,6 +67,7 @@ def complete_enrollment(s: Session, dep: Deployment, agent: Agent, actor: Actor)
 class DeploymentEngine:
     def __init__(self, ctx: AppContext) -> None:
         self.ctx = ctx
+        self.agent_profile = "windows-workstation"
 
     # ------------------------------------------------------------------ precheck
     async def precheck(self, dep_id: str) -> None:
@@ -107,16 +109,17 @@ class DeploymentEngine:
             record("REACHABLE", "FAIL", "Device not reachable by ARP or ICMP")
 
         winrm = reg.get(Protocol.WINRM)
-        hc = await winrm.health_check(Target(ip, port=5986))
+        port = await profile_port(ctx, profile)
+        hc = await winrm.health_check(Target(ip, port=port))
         record("WINRM_AVAILABLE", "PASS" if hc.ok else "FAIL",
-               f"HTTPS listener on {ip}:5986" if hc.ok else (hc.error_detail or hc.status.value))
+               f"WinRM listener on {ip}:{port}" if hc.ok else (hc.error_detail or hc.status.value))
         if not hc.ok:
             self._audit(dep_id, winrm_event(hc.status), hc.error_detail)
 
         session: RemoteSession | None = None
         if hc.ok:
             cred = await ctx.vault.resolve(profile, purpose=f"precheck {dep_id}", correlation_id=get_correlation_id())
-            res, session = await winrm.open_session(Target(ip, port=5986, credential=cred))
+            res, session = await winrm.open_session(Target(ip, port=port, credential=cred))
             record("AUTHENTICATION", "PASS" if session else "FAIL",
                    f"Authenticated as {cred.username} (profile {profile})" if session else res.error_detail or "")
             if session is None:
@@ -145,11 +148,14 @@ class DeploymentEngine:
                 r = await winrm.execute(session, RemoteOperation.QUERY_AGENT_INSTALLED, {})
                 installed = r.raw.get("installed")
                 record("EXISTING_AGENT", "FAIL" if installed else "PASS",
-                       f"Probe Agent {r.raw.get('version')} already installed" if installed else "No agent installed")
+                       ("An agent is already installed" + (f" (version {r.raw['version']})" if r.raw.get("version")
+                                                            else "") + ": remove it first") if installed
+                       else "No agent installed")
+                host, server_port = server_endpoint(ctx)
                 r = await winrm.execute(session, RemoteOperation.QUERY_SERVER_CONNECTIVITY,
-                                        {"server": ctx.settings.agent_server_url})
+                                        {"server": host, "port": server_port})
                 record("SERVER_CONNECTIVITY", "PASS" if r.ok else "FAIL",
-                       "Host can reach OTProbe server :443 through fw-conduit-01 (outbound only)" if r.ok
+                       f"Host can reach the OTProbe server {host}:{server_port} (outbound only)" if r.ok
                        else r.error_detail or "")
                 r = await winrm.execute(session, RemoteOperation.QUERY_REBOOT_PENDING, {})
                 pending = r.raw.get("reboot_pending")
@@ -209,14 +215,16 @@ class DeploymentEngine:
             pkg = s.get(Package, dep.package_id)
             ip, asset_id, profile = asset.ip, asset.id, dep.credential_profile
             ref = PackageRef(pkg.id, pkg.name, pkg.version, pkg.sha256, pkg.size_bytes)
+            self.agent_profile = agent_profile({p: r.value for p, r in effective_fields(s, asset.id).items()})
         winrm = reg.get(Protocol.WINRM)
+        port = await profile_port(ctx, profile)
 
-        tracker.start("CONNECT", f"Connecting to {ip}:5986")
-        hc = await winrm.health_check(Target(ip, port=5986))
+        tracker.start("CONNECT", f"Connecting to {ip}:{port}")
+        hc = await winrm.health_check(Target(ip, port=port))
         if not hc.ok:
             return self._fail(dep_id, tracker, "CONNECT", "CONNECT_FAILED", hc.error_detail or hc.status.value,
                               winrm_event(hc.status))
-        tracker.ok("CONNECT", f"TCP {ip}:5986 reachable through fw-conduit-01")
+        tracker.ok("CONNECT", f"TCP {ip}:{port} reachable")
 
         tracker.start("WINRM_SESSION", "Opening WinRM session")
         cred = await ctx.vault.resolve(profile, purpose=f"deployment {dep_id}", correlation_id=get_correlation_id())
@@ -226,7 +234,7 @@ class DeploymentEngine:
             stages.append({"name": st.name, "status": st.status.value, "detail": st.detail})
             tracker.update("WINRM_SESSION", f"{st.name}: {st.detail}", data={"stages": list(stages)})
 
-        res, session = await winrm.open_session(Target(ip, port=5986, credential=cred), on_stage)
+        res, session = await winrm.open_session(Target(ip, port=port, credential=cred), on_stage)
         if session is None:
             return self._fail(dep_id, tracker, "WINRM_SESSION", f"WINRM_{res.status.value}",
                               res.error_detail or res.status.value, winrm_event(res.status))
@@ -281,46 +289,57 @@ class DeploymentEngine:
                               "DEPLOY_HASH_FAIL")
         tracker.ok("VERIFY_HASH", f"SHA-256 matches repository ({ref.sha256[:12]}…)")
 
-        tracker.start("INSTALL", f"msiexec /i ProbeAgent-{ref.version}-x64.msi /qn")
+        tracker.start("INSTALL", f"Installing {ref.name} {ref.version} as service OTProbeAgent "
+                                 f"(profile {self.agent_profile})")
         r = await winrm.execute(session, RemoteOperation.INSTALL_AGENT, {
             "version": ref.version, "path": xfer.remote_path, "enrollment_token": token, "deployment_id": dep_id,
-            "server_url": ctx.settings.agent_server_url, "by": "OT-WINDOWS-INSTALLER"})
+            "server_url": server_url(ctx), "ca_sha256": ctx.settings.ca_sha256, "sha256": ref.sha256,
+            "profile": self.agent_profile, "by": "OT-WINDOWS-INSTALLER"})
         if not r.ok:
             await winrm.execute(session, RemoteOperation.REMOVE_FILES, cleanup)
             return self._fail(dep_id, tracker, "INSTALL", r.error_code or "INSTALL_FAILED",
                               r.error_detail or "Install failed", "DEPLOY_INSTALL_FAIL")
-        with ctx.db.session() as s:
-            agent = Agent(asset_id=asset_id, deployment_id=dep_id, version=ref.version)
-            AGENT.create(s, agent, ACTOR, {"deploymentId": dep_id, "version": ref.version})
-            asset = s.get(Asset, asset_id)
-            asset.agent_state, asset.current_agent_id = "ENROLLING", agent.id
-            s.get(Deployment, dep_id).agent_id = agent.id
-            events.stage(s, "asset.updated", "asset", asset_id, {"agentState": "ENROLLING"})
-        tracker.ok("INSTALL", f"Installed to {r.raw.get('path')} (exit code 0); enrollment bundle written")
+        try:
+            with ctx.db.session() as s:
+                agent = Agent(asset_id=asset_id, deployment_id=dep_id, version=ref.version)
+                AGENT.create(s, agent, ACTOR, {"deploymentId": dep_id, "version": ref.version})
+                asset = s.get(Asset, asset_id)
+                asset.agent_state, asset.current_agent_id = "ENROLLING", agent.id
+                s.get(Deployment, dep_id).agent_id = agent.id
+                events.stage(s, "asset.updated", "asset", asset_id, {"agentState": "ENROLLING"})
+            tracker.ok("INSTALL", f"Installed to {r.raw.get('path')} (exit code 0); enrollment bundle written")
 
-        tracker.start("SERVICE_CREATED", "Querying service OTProbeAgent")
-        r = await winrm.execute(session, RemoteOperation.QUERY_SERVICE, {"name": "OTProbeAgent"})
-        svc = r.raw.get("service")
-        if not svc:
-            return self._fail(dep_id, tracker, "SERVICE_CREATED", "SERVICE_MISSING", "Service OTProbeAgent not found",
-                              "DEPLOY_INSTALL_FAIL")
-        tracker.ok("SERVICE_CREATED", f"Service {svc['name']} created (start type {svc['start_type']})")
+            tracker.start("SERVICE_CREATED", "Querying service OTProbeAgent")
+            r = await winrm.execute(session, RemoteOperation.QUERY_SERVICE, {"name": "OTProbeAgent"})
+            svc = r.raw.get("service")
+            if not svc:
+                return self._fail(dep_id, tracker, "SERVICE_CREATED", "SERVICE_MISSING",
+                                  "Service OTProbeAgent not found", "DEPLOY_INSTALL_FAIL")
+            tracker.ok("SERVICE_CREATED", f"Service {svc['name']} created (start type {svc['start_type']})")
 
-        tracker.start("START_SERVICE", "Start-Service OTProbeAgent")
-        r = await winrm.execute(session, RemoteOperation.START_SERVICE, {"name": "OTProbeAgent"})
-        if not r.ok:
-            return self._fail(dep_id, tracker, "START_SERVICE", "SERVICE_START_FAILED", r.error_detail or "",
-                              "DEPLOY_INSTALL_FAIL")
-        await winrm.execute(session, RemoteOperation.REMOVE_FILES, cleanup)
-        tracker.ok("START_SERVICE", "Service running; staging files removed")
+            tracker.start("START_SERVICE", "Start-Service OTProbeAgent")
+            r = await winrm.execute(session, RemoteOperation.START_SERVICE, {"name": "OTProbeAgent"})
+            if not r.ok:
+                return self._fail(dep_id, tracker, "START_SERVICE", "SERVICE_START_FAILED", r.error_detail or "",
+                                  "DEPLOY_INSTALL_FAIL")
+            await winrm.execute(session, RemoteOperation.REMOVE_FILES, cleanup)
+            tracker.ok("START_SERVICE", "Service running; staging files removed")
 
-        tracker.start("AWAIT_ENROLLMENT",
-                      "Waiting for the agent to enroll and send its first heartbeat (outbound only)")
-        with ctx.db.session() as s:
-            dep = s.get(Deployment, dep_id)
-            dep.enrolling_since = utcnow()
-            DEPLOYMENT.transition(s, dep, "ENROLLING", ACTOR, details={"agentId": dep.agent_id})
-            # The agent may already have enrolled and heartbeated while the steps above were finishing.
-            agent = s.get(Agent, dep.agent_id)
-            if agent is not None and agent.status == "ONLINE" and agent.last_heartbeat_at is not None:
-                complete_enrollment(s, dep, agent, ACTOR)
+            tracker.start("AWAIT_ENROLLMENT",
+                          "Waiting for the agent to enroll and send its first heartbeat (outbound only)")
+            with ctx.db.session() as s:
+                dep = s.get(Deployment, dep_id)
+                dep.enrolling_since = utcnow()
+                DEPLOYMENT.transition(s, dep, "ENROLLING", ACTOR, details={"agentId": dep.agent_id})
+                # The agent may already have enrolled and heartbeated while the steps above were finishing.
+                agent = s.get(Agent, dep.agent_id)
+                if agent is not None and agent.status == "ONLINE" and agent.last_heartbeat_at is not None:
+                    complete_enrollment(s, dep, agent, ACTOR)
+        except Exception:
+            # Anything that breaks after the agent landed on the host must not leave it half-installed there.
+            log.exception("deployment %s failed after INSTALL; uninstalling from the host", dep_id)
+            undo = await winrm.execute(session, RemoteOperation.UNINSTALL_AGENT, {})
+            with ctx.db.session() as s:
+                audit.record(s, ACTOR, "DEPLOY_ROLLED_BACK", "deployment", dep_id,
+                             {"uninstalled": undo.ok, "detail": undo.error_detail})
+            raise

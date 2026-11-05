@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiAction, apiGet, apiSend } from "../api";
 import { useMe } from "../auth";
 import { ErrorBox, Panel, Pill, ago } from "../components/ui";
-import type { PluginInfo, SafetyView, ScanScope, VaultProfile } from "../types";
+import type { AgentBuild, PluginInfo, SafetyView, ScanScope, VaultProfile } from "../types";
 
 const LEVELS = ["?", "0", "1", "2", "3", "3.5", "4", "DMZ"];
 
@@ -16,6 +16,7 @@ export function LiveSettings() {
       <SafetyPanel admin={admin} />
       <ScopePanel admin={admin} />
       <VaultPanel admin={admin} />
+      <BuildsPanel admin={admin} />
     </>
   );
 }
@@ -221,7 +222,39 @@ function VaultPanel({ admin }: { admin: boolean }) {
         </form>)}
       <ErrorBox error={vault.error ?? save.error ?? remove.error} />
       <p className="hint">Secrets are encrypted at rest and write-only: the API never returns them. Discovery and probes use
-        OT-SNMPV3-RO, OT-WINDOWS-READONLY and OT-LINUX-SSH-RO by default.</p>
+        OT-SNMPV3-RO, OT-WINDOWS-READONLY and OT-LINUX-SSH-RO. Agent deployment, removal and restart use
+        OT-WINDOWS-INSTALLER (an administrator account on the target).</p>
+    </Panel>
+  );
+}
+
+function BuildsPanel({ admin }: { admin: boolean }) {
+  const qc = useQueryClient();
+  const builds = useQuery({ queryKey: ["agent-builds"], queryFn: () => apiGet<AgentBuild[]>("/agent-builds") });
+  const rescan = useMutation({
+    mutationFn: () => apiAction<{ registered: { version: string; builds: number }[];
+      rejected: { version: string; reason: string }[] }>("/agent-builds/rescan"),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["agent-builds"] }); qc.invalidateQueries({ queryKey: ["packages"] }); },
+  });
+  return (
+    <Panel title="Agent builds (signed releases)" actions={admin && (
+      <button className="btn btn-sm" disabled={rescan.isPending} onClick={() => rescan.mutate()}>Rescan releases</button>)}>
+      <table className="dense"><thead><tr><th>Version</th><th>Build</th><th>Platform</th><th>Runs on</th>
+        <th className="num">Size</th><th>SHA-256</th></tr></thead>
+        <tbody>{builds.data?.map((b) => (
+          <tr key={b.id}><td>{b.version}</td><td className="mono">{b.buildId}</td>
+            <td>{b.os}/{b.arch}{b.variant === "legacy" && <span className="pill pill-warn">LEGACY</span>}</td>
+            <td className="small">{b.minOs}</td><td className="num">{(b.sizeBytes / 1_048_576).toFixed(1)} MB</td>
+            <td className="mono small" title={b.sha256}>{b.sha256.slice(0, 16)}…</td></tr>))}
+          {builds.data?.length === 0 && <tr><td colSpan={6} className="muted">No verified release. Build with
+            agent-go/build.sh, sign with scripts/sign_release.py, then Rescan.</td></tr>}
+        </tbody></table>
+      {rescan.data?.rejected.map((r) => (
+        <div key={r.version} className="error-box">Release {r.version} rejected: {r.reason}</div>))}
+      <ErrorBox error={builds.error ?? rescan.error} />
+      <p className="hint">Only releases whose signature verifies against the release key, with every file matching the
+        signed SHA256SUMS, are listed. Each build is deployable as a package (Deployments → request). Legacy builds run on
+        Windows 7 / Server 2008 R2–2012 and are compiled with Go 1.20, which no longer receives security fixes.</p>
     </Panel>
   );
 }

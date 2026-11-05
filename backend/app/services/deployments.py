@@ -15,7 +15,7 @@ from app.core.errors import ProblemError, not_found
 from app.core.principal import CurrentUser
 from app.engines.deployment.engine import DeploymentEngine
 from app.models import Agent, Approval, Asset, Deployment, Package, PrecheckResult, WorkflowStep
-from app.services import approvals
+from app.services import approvals, safety
 from app.services.common import paginate
 from app.workflow.machine import APPROVAL, DEPLOYMENT
 
@@ -150,6 +150,7 @@ def start_precheck(ctx: AppContext, session: Session, dep_id: str, user: Current
                    ) -> tuple[dict[str, Any], Callable[[], None]]:
     dep = _load(session, dep_id)
     _require(ctx, dep, user, "precheck")
+    safety.ensure_can_scan(ctx, session, [session.get(Asset, dep.asset_id).ip])
     dep.precheck_run_no += 1
     dep.precheck_passed_at = None
     DEPLOYMENT.transition(session, dep, "PRECHECK_RUNNING", user.actor, details={"runNo": dep.precheck_run_no})
@@ -161,6 +162,7 @@ def start_deploy(ctx: AppContext, session: Session, dep_id: str, user: CurrentUs
                  ) -> tuple[dict[str, Any], Callable[[], None]]:
     dep = _load(session, dep_id)
     _require(ctx, dep, user, "deploy")
+    safety.ensure_can_scan(ctx, session, [session.get(Asset, dep.asset_id).ip])
     appr = session.get(Approval, dep.approval_id)
     now = utcnow()
     if appr.maint_window_start and not (appr.maint_window_start <= now <= appr.maint_window_end):

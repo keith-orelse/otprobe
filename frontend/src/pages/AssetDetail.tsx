@@ -182,7 +182,11 @@ function DeployRequest({ asset, onClose }: { asset: Asset; onClose: () => void }
   const [start, setStart] = useState(isoLocal(new Date()));
   const [end, setEnd] = useState(isoLocal(new Date(Date.now() + 2 * 3600_000)));
   const active = (packages.data ?? []).filter((p) => p.status === "ACTIVE");
-  const selected = pkg || active[0]?.id || "";
+  // Preselect a build made for this asset's OS (modern x64 first), e.g. "Windows 10 Home" -> windows-amd64.
+  const os = asset.os ?? "";
+  const fits = active.filter((p) => p.supportedOs.some((s) => os.includes(s)));
+  const best = fits.find((p) => p.architecture.endsWith("amd64") && !p.id.includes("legacy")) ?? fits[0] ?? active[0];
+  const selected = pkg || best?.id || "";
   const submit = useMutation({
     mutationFn: () => apiAction<Deployment>("/deployments", {
       assetId: asset.id, packageId: selected, purpose,

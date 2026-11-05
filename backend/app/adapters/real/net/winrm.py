@@ -89,6 +89,67 @@ SCRIPTS: dict[str, str] = {
 PARAMS = {"name": re.compile(r"^[A-Za-z0-9_.-]{1,64}$"), "server": re.compile(r"^[A-Za-z0-9.-]{1,253}$"),
           "port": re.compile(r"^\d{1,5}$")}
 
+# ---- Deployment scripts (phase L4) --------------------------------------------------------------------------------
+# The only scripts that change a host. Used by the deployment / removal engines through closed RemoteOperations,
+# never by probes. Every value is validated against DEPLOY_PARAMS before it is placed in a script.
+STAGING = "C:\\ProgramData\\OTProbe\\staging"
+INSTALL_DIR = "C:\\Program Files\\OTProbe\\Agent"
+DATA_DIR = "C:\\ProgramData\\OTProbe"
+DEPLOY_PARAMS = {
+    "path": re.compile(r"^C:\\ProgramData\\OTProbe\\staging(\\otprobe-agent-[0-9A-Za-z.-]{1,80}\.exe)?$"),
+    "sha256": re.compile(r"^[0-9a-f]{64}$"),
+    "token": re.compile(r"^enr_[A-Za-z0-9_-]{20,128}$"),
+    "server_url": re.compile(r"^https://[A-Za-z0-9.-]{1,253}(:\d{1,5})?/?$"),
+    "ca_sha256": re.compile(r"^([0-9a-f]{64})?$"),
+    "deployment_id": re.compile(r"^[0-9a-f-]{36}$"),
+    "profile": re.compile(r"^[a-z0-9-]{1,48}$"),
+}
+DEPLOY_SCRIPTS: dict[str, str] = {
+    "make_staging": f"New-Item -ItemType Directory -Force -Path '{STAGING}' | Out-Null; 'ok'",
+    "verify_hash": "(Get-FileHash -Algorithm SHA256 -LiteralPath '{path}').Hash.ToLower()",
+    "install": (
+        "$ErrorActionPreference = 'Stop'; $src = '{path}'; "
+        "if ((Get-FileHash -Algorithm SHA256 -LiteralPath $src).Hash.ToLower() -ne '{sha256}') "
+        "{ Remove-Item -LiteralPath $src -Force; throw 'HASH_MISMATCH: staged file does not match the release' }; "
+        f"$dir = '{INSTALL_DIR}'; $data = '{DATA_DIR}'; "
+        "New-Item -ItemType Directory -Force -Path $dir, $data | Out-Null; "
+        "$exe = Join-Path $dir 'otprobe-agent.exe'; $cfg = Join-Path $data 'agent.json'; "
+        "Copy-Item -LiteralPath $src -Destination $exe -Force; "
+        "@{serverUrl='{server_url}'; caSha256='{ca_sha256}'; enrollmentToken='{token}'; "
+        "deploymentId='{deployment_id}'; profile='{profile}'} | ConvertTo-Json | "
+        "Set-Content -LiteralPath $cfg -Encoding ASCII; "
+        "icacls $data /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' | Out-Null; "
+        "& $exe install --config $cfg; if ($LASTEXITCODE -ne 0) { throw \"INSTALL_FAILED: exit $LASTEXITCODE\" }; "
+        "@{path=$exe; version=(& $exe version)} | ConvertTo-Json -Compress"),
+    "start_service": "Start-Service -Name OTProbeAgent; [string](Get-Service -Name OTProbeAgent).Status",
+    "stop_service": "Stop-Service -Name OTProbeAgent -Force -ErrorAction SilentlyContinue; 'stopped'",
+    # Windows may hold the binary and keep the service "marked for deletion" for a few seconds after it stops:
+    # retry for up to 15 s before declaring residue.
+    "uninstall": (
+        f"$exe = '{INSTALL_DIR}\\otprobe-agent.exe'; "
+        "if (Test-Path $exe) { & $exe uninstall | Out-Null }; "
+        "for ($i = 0; $i -lt 15; $i++) { "
+        "Remove-Item -LiteralPath 'C:\\Program Files\\OTProbe' -Recurse -Force -ErrorAction SilentlyContinue; "
+        f"Remove-Item -LiteralPath '{DATA_DIR}' -Recurse -Force -ErrorAction SilentlyContinue; "
+        "if (-not (Test-Path $exe) -and -not (Get-Service -Name OTProbeAgent -ErrorAction SilentlyContinue)) "
+        "{ break }; Start-Sleep -Seconds 1 }; "
+        "if ((Get-Service -Name OTProbeAgent -ErrorAction SilentlyContinue) -or (Test-Path $exe)) "
+        "{ throw 'UNINSTALL_FAILED: agent files or service still present' }; 'removed'"),
+    "remove_staging": "Remove-Item -LiteralPath '{path}' -Recurse -Force -ErrorAction SilentlyContinue; 'ok'",
+}
+
+
+def render_deploy(name: str, params: dict) -> str:
+    if name not in DEPLOY_SCRIPTS:
+        raise ValueError(f"not a deployment script: {name}")
+    script = DEPLOY_SCRIPTS[name]
+    for k in re.findall(r"\{([a-z_0-9]+)\}", script):
+        v = str(params.get(k, ""))
+        if k not in DEPLOY_PARAMS or not DEPLOY_PARAMS[k].match(v):
+            raise ValueError(f"invalid deployment parameter {k}={v[:40]!r}")
+        script = script.replace("{" + k + "}", v)
+    return script
+
 
 @dataclass
 class WinRmReply:
@@ -169,9 +230,9 @@ def _classify(exc: Exception) -> tuple[str, str, str]:
 
 
 async def run(gate: NetworkGate, ip: str, port: int, cred: Credential, name: str, timeout_sec: float,
-              params: dict | None = None) -> WinRmReply:
-    script = render(name, params)
-    async with gate.permit(ip, "WINRM_PS"):
+              params: dict | None = None, deploy: bool = False) -> WinRmReply:
+    script = render_deploy(name, params or {}) if deploy else render(name, params)
+    async with gate.permit(ip, "WINRM_DEPLOY" if deploy else "WINRM_PS"):
         try:
             client = _client(ip, port, cred, timeout_sec)
             output, streams, had_errors = await asyncio.wait_for(
@@ -217,6 +278,24 @@ async def open_session(gate: NetworkGate, ip: str, port: int, cred: Credential, 
         return WinRmReply("ERROR", "SESSION_CREATED", output=version, detail=detail)
     await emit("SESSION_CREATED", "OK", f"PowerShell {version} remoting session works")
     return WinRmReply("OK", output=version)
+
+
+async def copy_file(gate: NetworkGate, ip: str, port: int, cred: Credential, local: str, remote: str,
+                    timeout_sec: float) -> WinRmReply:
+    """Copy one file to the host over the WinRM session (PSRP, base64 chunks). Used for agent binaries only;
+    ``remote`` must be inside the staging folder."""
+    if not DEPLOY_PARAMS["path"].match(remote):
+        raise ValueError(f"refusing to copy outside the staging folder: {remote}")
+    async with gate.permit(ip, "WINRM_COPY"):
+        try:
+            client = _client(ip, port, cred, timeout_sec)
+            await asyncio.wait_for(asyncio.to_thread(client.copy, local, remote), 900)
+        except asyncio.TimeoutError:
+            return WinRmReply("TIMEOUT", "SESSION_CREATED", detail="File copy did not finish within 15 minutes")
+        except Exception as exc:  # noqa: BLE001
+            status, stage, detail = _classify(exc)
+            return WinRmReply(status, stage, detail=detail)
+    return WinRmReply("OK", output=remote)
 
 
 def parse_json(text: str):

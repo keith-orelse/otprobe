@@ -16,3 +16,7 @@ backend/otprobe.db*
 *.key
 *.db-shm
 *.db-wal
+
+# Release signing keys (private) and built agents
+keys/
+backend/tls/

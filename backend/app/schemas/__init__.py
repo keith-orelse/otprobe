@@ -287,6 +287,25 @@ class SafetyView(Camel):
     traffic: dict[str, Any] | None = None
 
 
+class AgentBuild(Camel):
+    id: str
+    version: str
+    build_id: str
+    os: str
+    arch: str
+    variant: str
+    file: str
+    sha256: str
+    size_bytes: int
+    min_os: str
+    registered_at: datetime
+
+
+class AgentBuildScan(Camel):
+    registered: list[dict[str, Any]]
+    rejected: list[dict[str, Any]]
+
+
 class PluginInfo(Camel):
     name: str
     label: str
@@ -477,6 +496,8 @@ class Agent(Camel):
     status: str
     version: str
     credential_prefix: str | None
+    platform: str | None = None
+    profile: str | None = None
     installed_at: datetime
     enrolled_at: datetime | None
     last_heartbeat_at: datetime | None
@@ -501,6 +522,10 @@ class EnrollRequest(Camel):
     hostname: str
     host_fingerprint: str
     agent_version: str
+    os: str | None = Field(None, max_length=16)          # Go agent: runtime.GOOS
+    arch: str | None = Field(None, max_length=16)
+    variant: str | None = Field(None, max_length=16)     # modern | legacy
+    profile: str | None = Field(None, max_length=48)
 
 
 class EnrollResponse(Camel):

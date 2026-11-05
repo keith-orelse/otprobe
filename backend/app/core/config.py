@@ -7,9 +7,18 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 
+def _repo_path(rel: str, fallback: str) -> str:
+    local = Path(__file__).resolve().parents[3] / rel
+    return str(local) if local.exists() else fallback
+
+
 def _default_rules_dir() -> str:
     local = Path(__file__).resolve().parents[3] / "rules"
     return str(local) if local.is_dir() else "/app/rules"
+
+
+def _read(path: str | None) -> str:
+    return Path(path).read_text().strip() if path and Path(path).exists() else ""
 
 
 @dataclass(frozen=True)
@@ -40,10 +49,26 @@ class Settings:
     admin_password: str = ""            # first-start passwords for the seeded accounts (generated if empty)
     operator_password: str = ""
     approver_password: str = ""
+    agent_dist_dir: str = field(default_factory=lambda: _repo_path("agent-go/dist", "/data/agent-dist"))
+    agent_release_pubkey: str = ""      # base64 Ed25519 public key (or AGENT_RELEASE_PUBKEY_FILE)
+    public_url: str = ""                # what agents and install scripts use, e.g. https://192.168.0.160:8000
+    tls_ca_file: str = ""               # CA that signed the server certificate; its SHA-256 is pinned in agents
 
     @property
     def live(self) -> bool:
         return self.adapter_mode == "real"
+
+    @property
+    def ca_sha256(self) -> str:
+        """SHA-256 of the CA certificate (DER) that agents pin; empty when no CA file is configured."""
+        if not self.tls_ca_file or not Path(self.tls_ca_file).exists():
+            return ""
+        import hashlib
+
+        from cryptography import x509
+        from cryptography.hazmat.primitives.serialization import Encoding
+        cert = x509.load_pem_x509_certificate(Path(self.tls_ca_file).read_bytes())
+        return hashlib.sha256(cert.public_bytes(Encoding.DER)).hexdigest()
 
     @classmethod
     def from_env(cls, **overrides) -> "Settings":
@@ -71,6 +96,10 @@ class Settings:
             admin_password=env.get("OTPROBE_ADMIN_PASSWORD", ""),
             operator_password=env.get("OTPROBE_OPERATOR_PASSWORD", ""),
             approver_password=env.get("OTPROBE_APPROVER_PASSWORD", ""),
+            agent_dist_dir=env.get("AGENT_DIST_DIR", _repo_path("agent-go/dist", "/data/agent-dist")),
+            agent_release_pubkey=env.get("AGENT_RELEASE_PUBKEY", "") or _read(env.get("AGENT_RELEASE_PUBKEY_FILE")),
+            public_url=env.get("OTPROBE_PUBLIC_URL", ""),
+            tls_ca_file=env.get("OTPROBE_TLS_CA_FILE", ""),
         )
         values.update(overrides)
         return cls(**values)
