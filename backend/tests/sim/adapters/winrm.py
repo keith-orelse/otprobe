@@ -14,9 +14,9 @@ from app.adapters.base import (
     Target,
     WinRmAdapter,
 )
-from app.adapters.simulated.common import SimAdapterMixin, winrm_gate
 from app.core.clock import utcnow
 from app.core.ids import new_id
+from tests.sim.adapters.common import SimAdapterMixin, winrm_gate
 
 STAGES = ("CONNECTING", "TCP_OK", "TLS_VALIDATED", "AUTH_OK", "SESSION_CREATED")
 AGENT_SERVICE = "OTProbeAgent"

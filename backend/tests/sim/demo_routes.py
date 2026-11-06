@@ -1,13 +1,15 @@
+"""Demo Controls API (/api/v1/demo, admin only). Mounted only by the test simulator."""
+
 from fastapi import APIRouter, Depends
 
-from app import schemas
 from app.api.deps import admin_only, get_ctx
 from app.context import AppContext
 from app.core.idempotency import Idempotency, require_idempotency
 from app.core.principal import CurrentUser
-from app.services import demo
+from tests.sim import demo, schemas
+from tests.sim.reset import reset as do_reset
 
-router = APIRouter(prefix="/demo", tags=["demo"])
+router = APIRouter(prefix="/api/v1/demo", tags=["demo"])
 
 
 @router.get("/state", response_model=schemas.DemoState, summary="SIMULATION CONTROLS: devices and active faults")
@@ -32,7 +34,6 @@ async def rogue(user: CurrentUser = Depends(admin_only), idem: Idempotency = Dep
 @router.post("/reset", response_model=schemas.DemoResetResult,
              summary="SIMULATION CONTROLS: Reset POC to seed state (typed confirmation; audit log is kept)")
 async def reset(req: schemas.DemoReset, user: CurrentUser = Depends(admin_only), ctx: AppContext = Depends(get_ctx)):
-    from app.services.reset import reset as do_reset
     return await do_reset(ctx, req, user)
 
 

@@ -8,12 +8,13 @@ from app.main import create_app
 from app.models import DiscoveryJob
 from app.workflow.machine import DISCOVERY
 from tests.conftest import Harness, make_settings
+from tests.sim import SimEnvironment
 
 pytestmark = pytest.mark.acceptance
 
 
 async def test_restart_preserves_state(db_path):
-    app = create_app(make_settings(db_path))
+    app = create_app(make_settings(db_path), environment=SimEnvironment())
     async with app.router.lifespan_context(app):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as c:
             h = await Harness(app, c).login()
@@ -29,7 +30,7 @@ async def test_restart_preserves_state(db_path):
             assets_before = await h.assets()
             audit_before = (await h.get("/audit-events"))["total"]
 
-    app2 = create_app(make_settings(db_path))
+    app2 = create_app(make_settings(db_path), environment=SimEnvironment())
     async with app2.router.lifespan_context(app2):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app2), base_url="http://t") as c:
             h = await Harness(app2, c).login()

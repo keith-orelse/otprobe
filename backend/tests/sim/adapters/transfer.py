@@ -4,8 +4,8 @@ would produce (or a corrupted one when the package_checksum_mismatch fault is ac
 from __future__ import annotations
 
 from app.adapters.base import PackageRef, PackageTransfer, ProgressCallback, RemoteSession, ResultStatus, TransferResult
-from app.sim.latency import SimLatency
-from app.sim.world import SimWorld
+from tests.sim.latency import SimLatency
+from tests.sim.world import SimWorld
 
 CHUNKS = 10
 BANDWIDTH_MBPS = 80.0

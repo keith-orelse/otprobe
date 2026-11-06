@@ -143,7 +143,7 @@ async def test_checksum_failure_installs_nothing(discovered):
     dep = await request_deployment(h, EWS)
     await approve(h, dep)
     await precheck(h, dep["id"])
-    h.ctx.sim_control.set_fault("dev-ews01", "package_checksum_mismatch", {}, "test")
+    h.ctx.extras["sim_control"].set_fault("dev-ews01", "package_checksum_mismatch", {}, "test")
     failed = await deploy(h, dep["id"])
     assert failed["status"] == "FAILED" and failed["failureCode"] == "HASH_MISMATCH"
     assert failed["failureDetail"].startswith("Package hash mismatch")

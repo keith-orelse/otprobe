@@ -1,19 +1,20 @@
-"""Composition root: the only module that chooses real or simulated adapters and wires them into the app.
+"""Composition root: wires the real adapters, behind the network gate, into the app.
 
-ADAPTER_MODE=real (default): live network. Real adapters behind the network gate; no simulator is loaded, no demo
-data or demo passwords are seeded. ADAPTER_MODE=simulated: the POC world, used by the test suite until the
-simulator moves to tests (phase L6)."""
+The product only runs live (ADAPTER_MODE=real): no simulator, no demo data, no demo passwords. Any other mode needs an
+``Environment`` passed in by the caller; only the test suite does that (tests/sim.SimEnvironment, docs/DECISIONS.md
+L6-1)."""
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import typing
 from contextlib import asynccontextmanager
 from dataclasses import replace
 from pathlib import Path
-from typing import Callable, Iterable
+from typing import Any, Callable, Iterable, Sequence
 
-from fastapi import FastAPI
+from fastapi import APIRouter, FastAPI
 from sqlalchemy import select
 
 from app.adapters.base import Protocol
@@ -36,7 +37,7 @@ from app.rules.book import RuleBook
 from app.services import agent_builds, safety
 from app.services.agents import run_watchdog
 from app.services.assessments import sync_policies
-from app.services.bootstrap import seed_config, seed_live_users, seed_trust
+from app.services.bootstrap import seed_live_users
 from app.services.telemetry import TelemetryService
 from app.workflow.recovery import recover_interrupted
 from app.workflow.runner import JobRunner
@@ -48,23 +49,13 @@ AdapterPlugin = Callable[[AdapterRegistry, AppContext], None]
 log = logging.getLogger("otprobe")
 
 
-def _simulated_parts(settings: Settings, db: Database, fernet, registry: AdapterRegistry, pacer: Pacer) -> dict:
-    # Imported here so live mode never loads the simulator.
-    from app.adapters.simulated import SimulatedControl, build_transfer, register_simulated
-    from app.sim.broker import Broker
-    from app.sim.latency import SimLatency
-    from app.sim.seed import seed_world
-    from app.sim.world import SimWorld
+class Environment(typing.Protocol):
+    """A non-live environment (adapters, seed data, extra routes). Only the test suite provides one."""
 
-    with db.session() as s:
-        seed_world(s)
-        seed_config(s, fernet)
-        seed_trust(s)
-    world, broker = SimWorld(db), Broker()
-    latency = SimLatency(settings.seed, pacer)
-    register_simulated(registry, world, latency, broker)
-    return {"transfer": build_transfer(registry, world, latency), "sim_control": SimulatedControl(world, broker),
-            "gate": None, "extras": {"world": world, "broker": broker}}
+    routers: Sequence[APIRouter]
+
+    def build(self, settings: Settings, db: Database, fernet: Any, registry: AdapterRegistry,
+              pacer: Pacer) -> dict: ...
 
 
 def _live_parts(settings: Settings, db: Database, registry: AdapterRegistry) -> dict:
@@ -87,10 +78,14 @@ def _live_parts(settings: Settings, db: Database, registry: AdapterRegistry) -> 
         return None
 
     transfer = RealPackageTransfer(lambda: registry.get(Protocol.WINRM), resolve_build)
-    return {"transfer": transfer, "sim_control": None, "gate": gate, "extras": {}}
+    return {"transfer": transfer, "gate": gate, "extras": {}}
 
 
-def build_context(settings: Settings, plugins: Iterable[AdapterPlugin] = ()) -> AppContext:
+def build_context(settings: Settings, plugins: Iterable[AdapterPlugin] = (),
+                  environment: Environment | None = None) -> AppContext:
+    if not settings.live and environment is None:
+        raise RuntimeError(f"ADAPTER_MODE={settings.adapter_mode!r} needs a test environment (tests/sim); "
+                           "the server only runs with ADAPTER_MODE=real")
     if settings.run_migrations:
         upgrade(settings.database_url)
     if settings.live:
@@ -105,11 +100,11 @@ def build_context(settings: Settings, plugins: Iterable[AdapterPlugin] = ()) -> 
     fernet = fernet_for(settings.vault_key)
     pacer = Pacer(settings.speed_factor)
     registry = AdapterRegistry(settings.adapter_mode, parse_overrides(settings.adapter_overrides))
-    parts = _live_parts(settings, db, registry) if settings.live else _simulated_parts(settings, db, fernet,
-                                                                                         registry, pacer)
+    parts = _live_parts(settings, db, registry) if settings.live else environment.build(settings, db, fernet,
+                                                                                          registry, pacer)
     ctx = AppContext(settings=settings, db=db, hub=hub, registry=registry, vault=LocalCredentialVault(db, fernet),
                      runner=JobRunner(), pacer=pacer, rules=RuleBook.load(settings.rules_dir),
-                     transfer=parts["transfer"], sim_control=parts["sim_control"], tickets=StreamTickets(),
+                     transfer=parts["transfer"], tickets=StreamTickets(),
                      extras=parts["extras"], gate=parts["gate"])
     for plugin in plugins:
         plugin(registry, ctx)
@@ -130,12 +125,13 @@ def _sibling(key_file: str, name: str) -> str:
     return str(Path(key_file).with_name(f"otprobe-{name}.key")) if key_file else ""
 
 
-def create_app(settings: Settings | None = None, adapter_plugins: Iterable[AdapterPlugin] = ()) -> FastAPI:
+def create_app(settings: Settings | None = None, adapter_plugins: Iterable[AdapterPlugin] = (),
+               environment: Environment | None = None) -> FastAPI:
     settings = settings or Settings.from_env()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        ctx = build_context(settings, adapter_plugins)
+        ctx = build_context(settings, adapter_plugins, environment)
         app.state.ctx = ctx
         telemetry = ctx.extras["telemetry"] = TelemetryService(ctx)
         await telemetry.start()
@@ -155,9 +151,8 @@ def create_app(settings: Settings | None = None, adapter_plugins: Iterable[Adapt
     app.add_middleware(CorrelationMiddleware, environment="LIVE" if settings.live else "SIMULATED")
     install_problem_handlers(app)
     app.include_router(api_v1)
-    if not settings.live:
-        from app.api.sim.routes import router as sim_router
-        app.include_router(sim_router)
+    for router in environment.routers if environment is not None else ():
+        app.include_router(router)
     return app
 
 

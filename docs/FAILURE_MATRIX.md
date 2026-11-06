@@ -1,5 +1,8 @@
 # Failure matrix
 
+> Since phase L6 these faults exist only in the test simulator (`backend/tests/sim`). Real failure injection for
+> the live product is in [LIVE_TEST_PLAN.md](LIVE_TEST_PLAN.md).
+
 Each Demo Control writes a `sim_faults` row or changes `sim_devices.state`, and appends `DEMO_CONTROL_APPLIED`
 (actor = admin). OTProbe reacts **only through the adapters or the agent**, exactly as it would on a real network.
 The failure-specific audit event is written when the failure is *observed*, not when it is injected.

@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
-from app.adapters.base import SimulationControl
-from app.sim.seed import reset_world
-from app.sim.world import SimWorld
+from tests.sim.control_port import SimulationControl
+from tests.sim.seed import reset_world
+from tests.sim.world import SimWorld
 
 
 class SimulatedControl(SimulationControl):

@@ -7,7 +7,6 @@ from app.api.v1 import (
     audit,
     auth,
     dashboard,
-    demo,
     deployments,
     discovery,
     events,
@@ -20,5 +19,5 @@ from app.api.v1 import (
 
 router = APIRouter(prefix="/api/v1")
 for module in (auth, dashboard, discovery, assets, probes, deployments, agents, assessments, telemetry, topology,
-               vault, audit, demo, events, safety):
+               vault, audit, events, safety):
     router.include_router(module.router)

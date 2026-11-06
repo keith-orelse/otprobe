@@ -544,31 +544,6 @@ class HeartbeatIn(Camel):
     queue_depth: int | None = None
 
 
-class DemoFault(Camel):
-    fault: str = Field(examples=["heartbeat_blocked"])
-    enabled: bool = True
-    params: dict[str, Any] = {}
-
-
-class DemoDevice(Camel):
-    device_id: str
-    ip: str
-    hostname: str
-    type: str
-    level: str
-    powered: bool
-    online: bool
-    agent_installed: bool
-    faults: list[str]
-    config: dict[str, str] = {}
-
-
-class DemoState(Camel):
-    devices: list[DemoDevice]
-    available_faults: dict[str, str]
-    config_controls: dict[str, list[str]] = {}
-
-
 # ---------------------------------------------------------------- Phase 4: assessments, findings, drift, comparison
 class RuleInfo(Camel):
     id: str
@@ -741,11 +716,6 @@ class Comparison(Camel):
     rows: list[CompareRow]
 
 
-class DemoConfig(Camel):
-    control: Literal["firewall", "antivirus", "unauthorized_software", "remove_patch"]
-    value: str = Field(examples=["disabled"])
-
-
 class MonitoringRow(Camel):
     asset_id: str
     asset_name: str
@@ -763,7 +733,7 @@ AssetDetail.model_rebuild()
 DashboardSummary.model_rebuild()
 
 
-# ---------------------------------------------------------------- Phase 5: removal, telemetry, demo, reset
+# ---------------------------------------------------------------- Phase 5: removal, telemetry
 class RemovalCreate(Camel):
     purpose: str = Field("Decommission POC agent", min_length=3, max_length=500)
 
@@ -806,17 +776,5 @@ class TelemetryRecord(Camel):
     payload: Any = None
     received_at: datetime
 
-
-class DemoReset(Camel):
-    confirm: str = Field(description='Type "RESET" to confirm', examples=["RESET"])
-    clear_discovery_history: bool = False
-    force: bool = False
-
-
-class DemoResetResult(Camel):
-    status: str
-    cleared: dict[str, int]
-    discovery_history: str
-    agents_revoked: int
 
 Agent.model_rebuild()

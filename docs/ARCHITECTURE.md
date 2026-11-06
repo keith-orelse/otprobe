@@ -2,7 +2,7 @@
 
 > Status: complete (Phases 1–5). The decisions made during the build are in [DECISIONS.md](DECISIONS.md).
 >
-> **Live network redesign in progress:** see [LIVE_ARCHITECTURE.md](LIVE_ARCHITECTURE.md). This document describes the simulated POC, which is kept on the `simulated` branch.
+> **Live network redesign in progress:** see [LIVE_ARCHITECTURE.md](LIVE_ARCHITECTURE.md). This document describes the simulated POC, which is kept on the `simulated` branch. On `main` the simulator exists only inside the test suite (`backend/tests/sim`, phase L6).
 >
 > OTProbe is a standalone proof-of-concept for **OT asset discovery, agentless probing and deep agent probing**.
 > The OT network, its devices and every protocol response are **simulated**. The web console, REST API,
@@ -18,7 +18,7 @@ Related design documents:
 | [STATE_MACHINES.md](STATE_MACHINES.md) | All state machines, allowed transitions, audit event names |
 | [FAILURE_MATRIX.md](FAILURE_MATRIX.md) | Every injectable failure: resulting state, UI message, audit event, recovery |
 | [RULES.md](RULES.md) | Compliance rule schema, condition language, evaluation order, scoring formula |
-| [SIMULATED_NETWORK.md](SIMULATED_NETWORK.md) | Seed devices, topology, per-protocol behaviour |
+| `SIMULATED_NETWORK.md` (on the `simulated` branch) | Seed devices, topology, per-protocol behaviour |
 | [api/openapi.yaml](api/openapi.yaml) | OpenAPI 3.1 contract draft for `/api/v1` |
 
 ---

@@ -1,11 +1,12 @@
-"""Seed definition of the simulated plant. See docs/SIMULATED_NETWORK.md (★ values are test-relevant)."""
+"""Seed definition of the simulated plant. See docs/SIMULATED_NETWORK.md on the `simulated` branch
+(★ values are test-relevant)."""
 
 from __future__ import annotations
 
 from copy import deepcopy
 from typing import Any
 
-from app.core import demo_credentials as dc
+from tests.sim import demo_credentials as dc
 
 WIN_ACCOUNTS = {dc.WINDOWS_READONLY[2]: dc.WINDOWS_READONLY[3], dc.WINDOWS_INSTALLER[2]: dc.WINDOWS_INSTALLER[3]}
 SNMP_USER = {"username": dc.SNMPV3_RO[2], "secret": dc.SNMPV3_RO[3], "auth": "SHA-256", "priv": "AES-128"}

@@ -16,10 +16,11 @@ from app.adapters.base import (
     ResultStatus,
     Target,
 )
-from app.core import demo_credentials as dc
 from app.core.fields import PROVENANCE_FIELDS
 from app.main import build_context
 from tests.conftest import make_settings
+from tests.sim import SimEnvironment
+from tests.sim import demo_credentials as dc
 
 pytestmark = pytest.mark.contract
 
@@ -41,7 +42,7 @@ def cred(entry) -> Credential | None:
 
 @pytest.fixture
 def ctx(db_path):
-    c = build_context(make_settings(db_path))
+    c = build_context(make_settings(db_path), environment=SimEnvironment())
     yield c
     c.db.dispose()
 

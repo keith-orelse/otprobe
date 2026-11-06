@@ -20,8 +20,7 @@ export function Telemetry() {
     refetchInterval: 5000 });
   return (
     <div className="page">
-      <p className="hint">In-process broker (simulated, logically on historian-01:8883). The separate telemetry simulator publishes;
-        OTProbe subscribes to <span className="mono">factory/#</span>, attributes each publisher to an asset via the broker's client
+      <p className="hint">MQTT telemetry. OTProbe subscribes to <span className="mono">factory/#</span>, attributes each publisher to an asset via the broker's client
         list, and evaluates <span className="mono">rules/telemetry.yaml</span>. Thresholds and staleness raise TELEMETRY findings.</p>
       <ErrorBox error={q.error} />
       <Panel title="Topics">
@@ -41,7 +40,7 @@ export function Telemetry() {
                   : <span className="muted">none</span>}</td>
               </tr>);
           })}
-          {q.data?.length === 0 && <tr><td colSpan={8} className="muted">No telemetry yet. Is the telemetry simulator running?</td></tr>}
+          {q.data?.length === 0 && <tr><td colSpan={8} className="muted">No telemetry yet. The bundled MQTT broker is not set up yet (planned).</td></tr>}
           </tbody>
         </table>
       </Panel>

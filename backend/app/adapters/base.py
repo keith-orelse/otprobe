@@ -1,7 +1,7 @@
 """Protocol abstraction layer.
 
 Engines depend ONLY on the interfaces in this module. Real implementations live in ``app.adapters.real``
-(live network, behind the network gate); simulated ones in ``app.adapters.simulated`` (POC and tests).
+(live network, behind the network gate); simulated ones in ``tests.sim.adapters`` (POC and tests).
 Both must pass ``tests/contract``.
 
 Every adapter returns normalised data keyed by provenance field paths (see docs/PROVENANCE.md),
@@ -341,28 +341,3 @@ class CredentialVault(abc.ABC):
 
     @abc.abstractmethod
     async def delete(self, profile: str) -> None: ...
-
-
-class SimulationControl(abc.ABC):
-    """Port for admin Demo Controls. Only a simulated implementation exists; a real deployment would not register
-    one, and the demo endpoints would return 404."""
-
-    @abc.abstractmethod
-    def devices(self) -> list[dict[str, Any]]: ...
-
-    @abc.abstractmethod
-    def set_fault(self, device_id: str, fault: str, params: Mapping[str, Any], set_by: str) -> None: ...
-
-    @abc.abstractmethod
-    def clear_fault(self, device_id: str, fault: str) -> None: ...
-
-    @abc.abstractmethod
-    def inject_rogue(self) -> dict[str, Any]: ...
-
-    @abc.abstractmethod
-    def reset(self) -> None:
-        """Rebuild the simulated world from seed (Reset POC)."""
-
-    @abc.abstractmethod
-    def apply_config(self, device_id: str, control: str, value: str) -> str:
-        """Change host configuration; returns a human-readable description of the effect."""

@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { apiLogin } from "../api";
 import { setToken } from "../auth";
 import { Logo } from "../components/Logo";
-import { EnvBanner, useEnvironment } from "../components/Safety";
+import { EnvBanner } from "../components/Safety";
 import { ErrorBox } from "../components/ui";
 
 export function Login() {
@@ -11,7 +11,6 @@ export function Login() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<unknown>(null);
-  const env = useEnvironment();
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -35,10 +34,8 @@ export function Login() {
           onChange={(e) => setPassword(e.target.value)} /></label>
         <button className="btn btn-primary" disabled={!username || !password}>SIGN IN</button>
         <ErrorBox error={error} />
-        {env.data?.mode === "SIMULATED"
-          ? <p className="hint">Demo users (synthetic): operator / operator-demo · approver / approver-demo · admin / admin-demo</p>
-          : <p className="hint">Accounts: admin, operator, approver. First-start passwords come from OTPROBE_*_PASSWORD or the
-              server log.</p>}
+        <p className="hint">Accounts: admin, operator, approver. First-start passwords come from OTPROBE_*_PASSWORD or the
+          server log.</p>
       </form>
     </div>
   );

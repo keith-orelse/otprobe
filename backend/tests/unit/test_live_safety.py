@@ -98,7 +98,7 @@ def test_live_mode_never_imports_the_simulator(tmp_path):
         "from app.core.config import Settings\n"
         "from app.main import build_context\n"
         "ctx = build_context(Settings.from_env(database_url='sqlite:///%s', adapter_mode='real'))\n"
-        "sim = ('app.sim', 'app.adapters.simulated', 'app.api.sim')\n"
+        "sim = ('tests.sim', 'app.sim', 'app.adapters.simulated', 'app.api.sim')\n"
         "loaded = sorted(m for m in sys.modules if m.startswith(sim))\n"
         "assert not loaded, loaded\n"
         "assert ctx.gate is not None and not ctx.gate.configured\n"

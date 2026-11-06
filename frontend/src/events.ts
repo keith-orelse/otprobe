@@ -80,7 +80,6 @@ export function useServerEvents(): void {
         qc.invalidateQueries({ queryKey: ["agents"] });
       }
       if (topic === "telemetry") qc.invalidateQueries({ queryKey: ["telemetry"] });
-      if (topic === "demo") qc.invalidateQueries();
       if (topic === "safety") {
         qc.invalidateQueries({ queryKey: ["environment"] });
         qc.invalidateQueries({ queryKey: ["safety"] });
@@ -95,7 +94,7 @@ export function useServerEvents(): void {
       "asset.updated", "asset.rogue", "probe.status", "probe.step", "audit.event", "deployment.status",
       "deployment.step", "deployment.precheck", "approval.status", "agent.status", "agent.heartbeat",
       "assessment.status", "finding.status", "finding.updated", "drift.detected", "task.status",
-      "removal.status", "removal.step", "telemetry.message", "demo.reset", "safety.updated"];
+      "removal.status", "removal.step", "telemetry.message", "safety.updated"];
     connect();
     return () => { closed = true; window.clearTimeout(retry); es?.close(); };
   }, [qc]);

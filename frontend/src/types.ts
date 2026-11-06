@@ -107,10 +107,6 @@ export interface Agent { id: string; assetId: string; assetName: string | null; 
 export interface HeartbeatRecord { seq: number; receivedAt: string; agentTime: string | null;
   payload: Record<string, any> }
 
-export interface DemoDevice { deviceId: string; ip: string; hostname: string; type: string; level: string;
-  powered: boolean; online: boolean; agentInstalled: boolean; faults: string[]; config: Record<string, string> }
-export interface DemoState { devices: DemoDevice[]; availableFaults: Record<string, string>;
-  configControls: Record<string, string[]> }
 
 export interface RuleResult { seq: number; ruleId: string; ruleVersion: string; title: string; status: string;
   severity: string; evidencePath: string; observed: any; expected: string; message: string | null;
@@ -159,9 +155,6 @@ export interface Removal { id: string; assetId: string; assetName: string | null
 export interface TelemetryTopic { topic: string; clientId: string; assetId: string | null; assetName: string | null;
   lastPayload: any; lastAt: string; messages: number; openFindings: string[];
   recent: { at: string; payload: Record<string, any> }[] }
-
-export interface DemoResetResult { status: string; cleared: Record<string, number>; discoveryHistory: string;
-  agentsRevoked: number }
 
 export interface NavCounts { pendingApprovals: number; openFindings: number; criticalFindings: number;
   agentsAttention: number; rogueAssets: number; runningWorkflows: number }

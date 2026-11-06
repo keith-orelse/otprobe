@@ -14,8 +14,8 @@ from app.adapters.base import (
     StageCallback,
     Target,
 )
-from app.adapters.simulated.common import SimAdapterMixin
-from app.sim.broker import Broker, BrokerMessage
+from tests.sim.adapters.common import SimAdapterMixin
+from tests.sim.broker import Broker, BrokerMessage
 
 KINDS = {"temperature": "temperature", "pressure": "pressure", "status": "plc_status"}
 

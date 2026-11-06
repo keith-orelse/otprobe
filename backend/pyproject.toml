@@ -26,34 +26,10 @@ ignore = ["B008"]  # FastAPI Depends()/Query() defaults
 root_package = "app"
 
 [[tool.importlinter.contracts]]
-name = "Business layers never import the simulator or simulated adapters"
-type = "forbidden"
-source_modules = ["app.api.v1", "app.services", "app.engines"]
-forbidden_modules = ["app.sim", "app.adapters.simulated"]
-
-[[tool.importlinter.contracts]]
-name = "Simulator does not depend on business code"
-type = "forbidden"
-source_modules = ["app.sim"]
-forbidden_modules = ["app.api", "app.services", "app.engines", "app.adapters"]
-
-[[tool.importlinter.contracts]]
-name = "Simulated adapters do not depend on business code"
-type = "forbidden"
-source_modules = ["app.adapters.simulated"]
-forbidden_modules = ["app.api", "app.services", "app.engines"]
-
-[[tool.importlinter.contracts]]
 name = "Services and engines never depend on the API layer"
 type = "forbidden"
 source_modules = ["app.services", "app.engines"]
 forbidden_modules = ["app.api"]
-
-[[tool.importlinter.contracts]]
-name = "Simulator-facing /sim API never touches business services"
-type = "forbidden"
-source_modules = ["app.api.sim"]
-forbidden_modules = ["app.services", "app.engines"]
 
 [[tool.importlinter.contracts]]
 name = "Business layers never import real adapters or the network gate (registry and ctx.gate only)"
@@ -62,7 +38,7 @@ source_modules = ["app.api.v1", "app.services", "app.engines"]
 forbidden_modules = ["app.adapters.real"]
 
 [[tool.importlinter.contracts]]
-name = "Real adapters do not depend on business code or the simulator"
+name = "Real adapters do not depend on business code"
 type = "forbidden"
 source_modules = ["app.adapters.real"]
-forbidden_modules = ["app.api", "app.services", "app.engines", "app.sim", "app.adapters.simulated"]
+forbidden_modules = ["app.api", "app.services", "app.engines"]

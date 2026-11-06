@@ -5,7 +5,6 @@ from __future__ import annotations
 
 from sqlalchemy import delete, func, select, update
 
-from app import schemas
 from app.context import AppContext
 from app.core import audit, events
 from app.core.clock import utcnow
@@ -37,6 +36,7 @@ from app.models import (
     TelemetryMessage,
     WorkflowStep,
 )
+from tests.sim import schemas
 
 # children before parents (foreign keys)
 KNOWLEDGE_TABLES = [Heartbeat, AgentTask, RuleResult, DriftEvent, EvidenceChange, FindingEvent, Finding,
@@ -47,8 +47,6 @@ KNOWLEDGE_TABLES = [Heartbeat, AgentTask, RuleResult, DriftEvent, EvidenceChange
 async def reset(ctx: AppContext, req: schemas.DemoReset, user: CurrentUser) -> schemas.DemoResetResult:
     if req.confirm != "RESET":
         raise ProblemError(422, "confirmation-required", 'Type "RESET" to confirm the reset')
-    if ctx.sim_control is None:
-        raise ProblemError(404, "not-found", "Simulation controls are not available")
     busy = ctx.runner.active()
     if busy and not req.force:
         raise ProblemError(409, "workflows-running", "Workflows are still running",
@@ -73,7 +71,7 @@ async def reset(ctx: AppContext, req: schemas.DemoReset, user: CurrentUser) -> s
             history = "kept (archived: not used as a rogue baseline)"
         cleared["assets"] = s.scalar(select(func.count()).select_from(Asset)) or 0
         s.execute(delete(Asset))
-    ctx.sim_control.reset()
+    ctx.extras["sim_control"].reset()
     ctx.task_signals.clear()
     with ctx.db.session() as s:
         audit.record(s, user.actor, "POC_RESET", "poc", None, {

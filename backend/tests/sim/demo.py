@@ -1,12 +1,12 @@
-"""SIMULATION CONTROLS (admin only). Phase 3 exposes device faults; the full Demo Controls set arrives in Phase 5."""
+"""SIMULATION CONTROLS (admin only): device faults, host configuration and rogue devices for the test simulator."""
 
 from __future__ import annotations
 
-from app import schemas
 from app.context import AppContext
 from app.core import audit
 from app.core.errors import ProblemError
 from app.core.principal import CurrentUser
+from tests.sim import schemas
 
 FAULTS = {
     "heartbeat_blocked": "Break agent heartbeat (network path drops agent traffic)",
@@ -38,9 +38,7 @@ CONFIG_VALUES = {
 
 
 def _control(ctx: AppContext):
-    if ctx.sim_control is None:
-        raise ProblemError(404, "not-found", "Simulation controls are not available")
-    return ctx.sim_control
+    return ctx.extras["sim_control"]
 
 
 def state(ctx: AppContext) -> schemas.DemoState:

@@ -18,12 +18,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.core.config import Settings  # noqa: E402
 from app.main import create_app  # noqa: E402
+from tests.sim import SimEnvironment  # noqa: E402
 
 TEST_SPEED = 0.002
 BOTH_SUBNETS = ["192.168.20.0/24", "192.168.10.0/24"]
 PASSWORDS = {"operator": "operator-demo", "approver": "approver-demo", "admin": "admin-demo"}
-AGENT_DIR = Path(__file__).resolve().parents[2] / "agent"
-TELEMETRY_DIR = Path(__file__).resolve().parents[2] / "telemetry"
+AGENT_DIR = Path(__file__).resolve().parent / "sim" / "agent"
+TELEMETRY_DIR = Path(__file__).resolve().parent / "sim" / "telemetry"
 SIM_HEADERS = {"X-Sim-Token": "change-me-sim-token"}
 
 
@@ -105,7 +106,7 @@ def db_path(tmp_path: Path) -> Path:
 
 @pytest.fixture
 async def h(db_path: Path):
-    app = create_app(make_settings(db_path))
+    app = create_app(make_settings(db_path), environment=SimEnvironment())
     async with app.router.lifespan_context(app):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
             yield await Harness(app, client).login("operator")
@@ -130,7 +131,8 @@ class LiveServer:
     def __init__(self, db_path: Path, **settings) -> None:
         self.port = free_port()
         self.url = f"http://127.0.0.1:{self.port}"
-        self.app = create_app(make_settings(db_path, agent_server_url=self.url, **settings))
+        self.app = create_app(make_settings(db_path, agent_server_url=self.url, **settings),
+                              environment=SimEnvironment())
         self.server = uvicorn.Server(uvicorn.Config(self.app, host="127.0.0.1", port=self.port, log_level="warning"))
         self.task: asyncio.Task | None = None
 
@@ -162,7 +164,8 @@ def spawn_telemetry_sim(api_url: str, log_path: Path, interval: float = 0.2) -> 
 @pytest.fixture
 async def h_fast(db_path: Path):
     """In-process app with telemetry staleness windows scaled down (30 s -> 1.5 s)."""
-    app = create_app(make_settings(db_path, telemetry_time_scale=0.05, heartbeat_interval_sec=1.0))
+    app = create_app(make_settings(db_path, telemetry_time_scale=0.05, heartbeat_interval_sec=1.0),
+                     environment=SimEnvironment())
     async with app.router.lifespan_context(app):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
             yield await Harness(app, client).login("operator")

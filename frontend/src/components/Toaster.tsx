@@ -40,8 +40,6 @@ function toToast(e: SseEvent): Omit<Toast, "id"> | null {
     case "discovery.status":
       if (s === "COMPLETED") return { tone: "info", title: "Discovery completed", body: `Job ${short(id)}`, to: "/discovery" };
       return null;
-    case "demo.reset":
-      return { tone: "info", title: "POC reset", body: "Seed state restored", to: "/" };
     default:
       return null;
   }

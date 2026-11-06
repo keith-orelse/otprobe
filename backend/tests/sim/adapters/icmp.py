@@ -13,8 +13,8 @@ from app.adapters.base import (
     StageCallback,
     Target,
 )
-from app.adapters.simulated.common import SimAdapterMixin
-from app.sim.world import DeviceView
+from tests.sim.adapters.common import SimAdapterMixin
+from tests.sim.world import DeviceView
 
 HIGH_LATENCY_MS = 100.0
 _STATUS = {Reachability.ONLINE: ResultStatus.OK, Reachability.HIGH_LATENCY: ResultStatus.OK,

@@ -61,7 +61,7 @@ export function Dashboard() {
       <div className="empty-hero">
         <div className="header-icon-bg"><Radar size={28} /></div>
         <h2>No assets discovered yet</h2>
-        <p>Start with a discovery of the simulated OT subnets. Devices appear one by one; nothing real is scanned.</p>
+        <p>Start with a discovery of the approved scan scope. Devices appear one by one.</p>
         <Link to="/discovery" className="btn btn-primary">Start discovery</Link>
       </div>
     );

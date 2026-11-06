@@ -4,18 +4,18 @@ from __future__ import annotations
 
 from app.adapters.base import Protocol
 from app.adapters.registry import AdapterRegistry
-from app.adapters.simulated.arp import SimulatedArpAdapter
-from app.adapters.simulated.control import SimulatedControl
-from app.adapters.simulated.icmp import SimulatedIcmpAdapter
-from app.adapters.simulated.mqtt import SimulatedMqttAdapter
-from app.adapters.simulated.snmp import SimulatedSnmpAdapter
-from app.adapters.simulated.ssh import SimulatedSshAdapter
-from app.adapters.simulated.transfer import SimulatedPackageTransfer
-from app.adapters.simulated.winrm import SimulatedWinRmAdapter
-from app.adapters.simulated.wmi import SimulatedWmiAdapter
-from app.sim.broker import Broker
-from app.sim.latency import SimLatency
-from app.sim.world import SimWorld
+from tests.sim.adapters.arp import SimulatedArpAdapter
+from tests.sim.adapters.control import SimulatedControl
+from tests.sim.adapters.icmp import SimulatedIcmpAdapter
+from tests.sim.adapters.mqtt import SimulatedMqttAdapter
+from tests.sim.adapters.snmp import SimulatedSnmpAdapter
+from tests.sim.adapters.ssh import SimulatedSshAdapter
+from tests.sim.adapters.transfer import SimulatedPackageTransfer
+from tests.sim.adapters.winrm import SimulatedWinRmAdapter
+from tests.sim.adapters.wmi import SimulatedWmiAdapter
+from tests.sim.broker import Broker
+from tests.sim.latency import SimLatency
+from tests.sim.world import SimWorld
 
 
 def register_simulated(registry: AdapterRegistry, world: SimWorld, latency: SimLatency, broker: Broker) -> None:

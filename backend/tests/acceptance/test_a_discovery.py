@@ -11,6 +11,7 @@ import uvicorn
 
 from app.main import create_app
 from tests.conftest import BOTH_SUBNETS, free_port, make_settings
+from tests.sim import SimEnvironment
 
 pytestmark = pytest.mark.acceptance
 SENSORS = {"192.168.10.20", "192.168.10.21"}
@@ -46,7 +47,7 @@ async def test_merge_by_mac_and_ip_change(discovered):
     assert {a["mac"]: a["id"] for a in await h.assets()} == before
 
     h.ctx.extras["world"].update_state("dev-ews02", lambda st: None)
-    from app.models import SimDevice
+    from tests.sim.models import SimDevice
     with h.ctx.db.session() as s:
         s.get(SimDevice, "dev-ews02").ip = "192.168.20.15"
     await h.discover(["192.168.20.0/24"])
@@ -107,7 +108,7 @@ async def test_offline_device_marked_after_discovery(discovered):
 async def test_sse_stream_over_http(db_path):
     """Real HTTP + SSE through uvicorn (loopback only), as the console consumes it."""
     port = free_port()
-    app = create_app(make_settings(db_path, speed_factor=0.02))
+    app = create_app(make_settings(db_path, speed_factor=0.02), environment=SimEnvironment())
     server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
     task = asyncio.create_task(server.serve())
     while not server.started:

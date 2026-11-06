@@ -12,7 +12,7 @@ from app.adapters.base import (
     StageCallback,
     Target,
 )
-from app.adapters.simulated.common import SimAdapterMixin
+from tests.sim.adapters.common import SimAdapterMixin
 
 
 class SimulatedArpAdapter(SimAdapterMixin, ArpAdapter):

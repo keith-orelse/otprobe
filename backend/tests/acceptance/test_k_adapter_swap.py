@@ -19,6 +19,7 @@ from app.adapters.base import (
 )
 from app.main import build_context, create_app
 from tests.conftest import Harness, make_settings
+from tests.sim import SimEnvironment
 
 pytestmark = pytest.mark.acceptance
 
@@ -48,7 +49,8 @@ def plugin(registry, ctx) -> None:
 
 
 async def test_override_selects_alternative_adapter(db_path):
-    app = create_app(make_settings(db_path, adapter_overrides="snmp=fake"), adapter_plugins=[plugin])
+    app = create_app(make_settings(db_path, adapter_overrides="snmp=fake"), adapter_plugins=[plugin],
+                     environment=SimEnvironment())
     async with app.router.lifespan_context(app):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as c:
             h = await Harness(app, c).login()
@@ -63,4 +65,4 @@ async def test_override_selects_alternative_adapter(db_path):
 
 def test_unknown_adapter_fails_fast(db_path):
     with pytest.raises(RuntimeError, match="No nonexistent adapter registered for protocol 'icmp'"):
-        build_context(make_settings(db_path, adapter_overrides="icmp=nonexistent"))
+        build_context(make_settings(db_path, adapter_overrides="icmp=nonexistent"), environment=SimEnvironment())

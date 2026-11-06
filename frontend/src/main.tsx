@@ -12,7 +12,6 @@ import { AssetDetail } from "./pages/AssetDetail";
 import { Assets } from "./pages/Assets";
 import { AuditLogs } from "./pages/AuditLogs";
 import { Dashboard } from "./pages/Dashboard";
-import { DemoControls } from "./pages/DemoControls";
 import { DeploymentDetail, Deployments } from "./pages/Deployments";
 import { Discovery } from "./pages/Discovery";
 import { Login } from "./pages/Login";
@@ -44,7 +43,6 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             <Route path="approvals" element={<Approvals />} />
             <Route path="agents" element={<Agents />} />
             <Route path="agents/:id" element={<AgentDetail />} />
-            <Route path="demo" element={<DemoControls />} />
             <Route path="assessments" element={<Assessments />} />
             <Route path="assessments/:id" element={<AssessmentDetail />} />
             <Route path="findings" element={<Findings />} />

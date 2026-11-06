@@ -10,9 +10,9 @@ import pytest
 
 from app.engines.assessment.engine import evaluate_policy, evidence_diff, is_drift, score
 from app.rules.book import RuleBook
-from app.sim.seed_data import DEVICES
+from tests.sim.seed_data import DEVICES
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "agent"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "sim" / "agent"))
 from otprobe_agent.collectors import collect  # noqa: E402
 
 ALL = ["os", "hardware", "firewall", "antivirus", "patches", "software", "services", "local_admins",

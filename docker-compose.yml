@@ -1,18 +1,10 @@
-# OTProbe. Default: LIVE network mode (docs/LIVE_ARCHITECTURE.md) on a Linux host.
-#   docker compose up -d                                   live mode: real adapters, nothing scanned until an
-#                                                          admin adds a scan scope (Settings -> Scan scope)
-#   ADAPTER_MODE=simulated docker compose --profile simulated up -d
-#                                                          the original simulated POC (no real devices contacted)
+# OTProbe on a Linux host, live network only (docs/LIVE_ARCHITECTURE.md). Nothing is scanned until an admin adds a
+# scan scope (Settings -> Scan scope). The simulated POC is on the `simulated` branch.
+#   docker compose up -d
 name: otprobe
 
-x-sim-env: &sim-env
-  SPEED_FACTOR: ${SPEED_FACTOR:-1.0}
-  SEED: ${SEED:-42}
-  HEARTBEAT_INTERVAL_SEC: ${HEARTBEAT_INTERVAL_SEC:-10}
-  SIM_SERVICE_TOKEN: ${SIM_SERVICE_TOKEN:-change-me-sim-token}
-
 # The API uses the host's network stack (ARP needs layer 2; scans must leave from the host's own address), so the
-# other containers reach it through the host gateway under the name "api".
+# web container reaches it through the host gateway under the name "api".
 x-api-host: &api-host
   extra_hosts: ["api:host-gateway"]
 
@@ -23,8 +15,7 @@ services:
     cap_drop: [ALL]
     cap_add: [NET_RAW]          # ICMP echo and ARP only
     environment:
-      <<: *sim-env
-      ADAPTER_MODE: ${ADAPTER_MODE:-real}
+      HEARTBEAT_INTERVAL_SEC: ${HEARTBEAT_INTERVAL_SEC:-10}
       SAFE_MODE: ${SAFE_MODE:-true}
       SCAN_MAX_PPS: ${SCAN_MAX_PPS:-50}
       ASSESSMENT_INTERVAL_SEC: ${ASSESSMENT_INTERVAL_SEC:-300}
@@ -47,30 +38,6 @@ services:
       interval: 5s
       timeout: 3s
       retries: 20
-
-  agent-runtime:
-    # SIMULATED mode only: simulated Probe Agents (the Go agent replaces this in phase L4).
-    profiles: [simulated]
-    build: { context: ., dockerfile: agent/Dockerfile }
-    <<: *api-host
-    environment:
-      <<: *sim-env
-      OTPROBE_API_URL: http://api:8000
-      RUNTIME_POLL_SEC: "2"
-    depends_on: { api: { condition: service_healthy } }
-    restart: unless-stopped
-
-  telemetry-sim:
-    # SIMULATED mode only: simulated MQTT publishers (the bundled Mosquitto replaces this in phase L5).
-    profiles: [simulated]
-    build: { context: ., dockerfile: telemetry/Dockerfile }
-    <<: *api-host
-    environment:
-      <<: *sim-env
-      OTPROBE_API_URL: http://api:8000
-      TELEMETRY_INTERVAL_SEC: ${TELEMETRY_INTERVAL_SEC:-5}
-    depends_on: { api: { condition: service_healthy } }
-    restart: unless-stopped
 
   web:
     build: { context: ., dockerfile: frontend/Dockerfile }

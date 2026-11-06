@@ -12,8 +12,8 @@ from app.adapters.base import (
     StageCallback,
     Target,
 )
-from app.adapters.simulated.common import SimAdapterMixin
-from app.sim.world import DeviceView
+from tests.sim.adapters.common import SimAdapterMixin
+from tests.sim.world import DeviceView
 
 ALL_GROUPS = ("system", "interfaces", "entity", "lldp", "plc")
 

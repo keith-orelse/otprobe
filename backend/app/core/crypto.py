@@ -14,7 +14,7 @@ MASK = "••••••••"
 
 
 def fernet_for(vault_key: str) -> Fernet:
-    # An empty VAULT_KEY derives a fixed demo key. Only the simulated mode allows this (every secret is synthetic);
+    # An empty VAULT_KEY derives a fixed demo key. Only the test simulator uses this (every secret is synthetic);
     # live mode always goes through live_vault_key().
     key = vault_key or base64.urlsafe_b64encode(hashlib.sha256(b"otprobe-demo-vault-key").digest()).decode()
     return Fernet(key.encode())

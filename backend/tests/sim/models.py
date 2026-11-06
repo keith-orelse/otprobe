@@ -1,4 +1,4 @@
-"""Simulated world tables. Read/written ONLY by app.sim and app.adapters.simulated."""
+"""Simulated world tables. Read/written ONLY by app.sim and tests.sim.adapters."""
 
 from __future__ import annotations
 
@@ -6,14 +6,18 @@ from datetime import datetime
 from typing import Any
 
 from sqlalchemy import JSON, Boolean, String, UniqueConstraint
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from app.core.clock import utcnow
 from app.core.ids import new_id
-from app.models.base import Base, UtcDateTime
+from app.models.base import UtcDateTime
 
 
-class SimDevice(Base):
+class SimBase(DeclarativeBase):
+    pass
+
+
+class SimDevice(SimBase):
     __tablename__ = "sim_devices"
     device_id: Mapped[str] = mapped_column(String(64), primary_key=True)
     ip: Mapped[str] = mapped_column(String(45), unique=True)
@@ -27,7 +31,7 @@ class SimDevice(Base):
     state: Mapped[dict[str, Any]] = mapped_column(JSON)
 
 
-class SimFault(Base):
+class SimFault(SimBase):
     __tablename__ = "sim_faults"
     __table_args__ = (UniqueConstraint("device_id", "fault"),)
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
@@ -38,7 +42,7 @@ class SimFault(Base):
     set_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow)
 
 
-class SimMqttClient(Base):
+class SimMqttClient(SimBase):
     __tablename__ = "sim_mqtt_clients"
     client_id: Mapped[str] = mapped_column(String(64), primary_key=True)
     device_id: Mapped[str] = mapped_column(String(64))
@@ -47,7 +51,7 @@ class SimMqttClient(Base):
     topics: Mapped[list[str]] = mapped_column(JSON, default=list)
 
 
-class SimMeta(Base):
+class SimMeta(SimBase):
     __tablename__ = "sim_meta"
     key: Mapped[str] = mapped_column(String(64), primary_key=True)
     value: Mapped[Any] = mapped_column(JSON)

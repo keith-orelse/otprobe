@@ -53,7 +53,7 @@ erDiagram
 | Table | Key columns | Notes |
 |---|---|---|
 | `users` | id, username UQ, display_name, role (`OPERATOR`/`APPROVER`/`ADMIN`), password_hash, active | Seed: operator/approver/admin (passwords in `.env.example`, demo only) |
-| `zones` | id, name, cidr UQ, default_level, safe_mode, conduit_id | Seed per SIMULATED_NETWORK §1 |
+| `zones` | id, name, cidr UQ, default_level, safe_mode, conduit_id | Live: created from the scan scope. Tests: seeded by `tests/sim/seed.py` |
 | `settings` | key PK, value JSON, updated_by, updated_at | e.g. assessment interval override, criticality defaults |
 | `credential_profiles` | id, name UQ (`OT-WINDOWS-READONLY`, `OT-WINDOWS-INSTALLER`, `OT-SNMPV3-RO`, `OT-LINUX-SSH-RO`), protocol, username, secret_ciphertext, description, rotated_at | Secret encrypted with Fernet using `VAULT_KEY` from env. The API returns only masked values |
 | `packages` | id, name, version, architecture (`x64`), sha256, size_bytes, supported_os JSON, status (`ACTIVE`/`DEPRECATED`/`BLOCKED`), created_at, release_notes | Seed: Probe Agent 1.0.0 (DEPRECATED), 1.1.0 (ACTIVE) |

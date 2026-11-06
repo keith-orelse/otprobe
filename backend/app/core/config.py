@@ -29,7 +29,7 @@ class Settings:
     assessment_interval_sec: float = 300.0
     enrollment_token_ttl_sec: int = 900
     enrollment_timeout_sec: float = 120.0
-    adapter_mode: str = "real"          # "real" = live network (docs/LIVE_ARCHITECTURE.md); "simulated" = POC/tests
+    adapter_mode: str = "real"          # "real" = live network; "simulated" only with tests/sim (DECISIONS L6-1)
     adapter_overrides: str = ""
     database_url: str = "sqlite:///./otprobe.db"
     rules_dir: str = field(default_factory=_default_rules_dir)

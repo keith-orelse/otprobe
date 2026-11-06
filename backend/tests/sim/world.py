@@ -10,8 +10,8 @@ from typing import Any, Callable
 from sqlalchemy import delete, select
 
 from app.core.db import Database
-from app.models import SimDevice, SimFault, SimMeta, SimMqttClient
-from app.sim import seed_data
+from tests.sim import seed_data
+from tests.sim.models import SimDevice, SimFault, SimMeta, SimMqttClient
 
 
 @dataclass(frozen=True)

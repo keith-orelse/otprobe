@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any, AsyncIterator
 
 from app.adapters.base import AdapterResult, DiscoveredHost, Query, ResultStatus, StageCallback, Target, WmiAdapter
-from app.adapters.simulated.common import SimAdapterMixin, winrm_gate
+from tests.sim.adapters.common import SimAdapterMixin, winrm_gate
 
 ALL_GROUPS = ("os", "hardware", "firewall", "antivirus", "software", "services", "hotfixes", "network")
 CIM_CLASSES = {

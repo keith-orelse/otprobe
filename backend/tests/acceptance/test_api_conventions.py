@@ -22,7 +22,7 @@ async def test_problem_details(h):
 
 
 async def test_targets_outside_simulated_network_rejected(h):
-    for target, slug in (("10.0.0.0/8", "target-not-in-simulated-network"),
+    for target, slug in (("10.0.0.0/8", "target-not-in-zone"),
                          ("192.168.35.0/24", "zone-not-scannable"), ("not-a-cidr", "invalid-target")):
         r = await h.post("/discovery/jobs", {"targets": [target]})
         assert r.status_code == 422 and r.json()["type"].endswith(slug), r.text

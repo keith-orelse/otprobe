@@ -2,7 +2,7 @@ import type { LucideIcon } from "lucide-react";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
-  Activity, AlertTriangle, BadgeCheck, ClipboardCheck, Cpu, FlaskConical, LayoutDashboard, LogOut, Network,
+  Activity, AlertTriangle, BadgeCheck, ClipboardCheck, Cpu, LayoutDashboard, LogOut, Network,
   PanelLeftClose, PanelLeftOpen, Radar, Rocket, ScanSearch, ScrollText, Server, Settings,
 } from "lucide-react";
 import { Navigate, NavLink, Outlet, useLocation } from "react-router-dom";
@@ -48,8 +48,6 @@ export const NAV: NavEntry[] = [
     description: "Live sensor and PLC telemetry with threshold rules" },
   { label: "Audit Logs", to: "/audit", icon: ScrollText, group: "Administration",
     description: "Append-only, hash-chained record of every action and transition" },
-  { label: "Demo Controls", to: "/demo", icon: FlaskConical, group: "Administration", title: "SIMULATION CONTROLS",
-    description: "Change the simulated world. OTProbe notices only through probes and agents" },
   { label: "Settings", to: "/settings", icon: Settings, group: "Administration",
     description: "Scan scope, safety controls, credential vault and adapters" },
 ];
@@ -87,7 +85,6 @@ function Shell() {
   const Icon = entry?.icon;
   const env = useEnvironment();
   const live = env.data?.mode === "LIVE";
-  const nav = NAV.filter((n) => !(live && n.to === "/demo"));
   const initials = (me.data?.displayName ?? "?").split(" ").map((w) => w[0]).slice(0, 2).join("");
   return (
     <div className="app">
@@ -98,7 +95,7 @@ function Shell() {
           {GROUPS.map((group) => (
             <div className="nav-group" key={group}>
               <div className="nav-label">{group}</div>
-              {nav.filter((n) => n.group === group).map((n) => {
+              {NAV.filter((n) => n.group === group).map((n) => {
                 const badge = counts.data && n.badge ? n.badge(counts.data) : null;
                 return (
                   <NavLink key={n.to} to={n.to} end={n.to === "/"} title={collapsed ? n.label : undefined}
@@ -112,7 +109,7 @@ function Shell() {
           ))}
           <div className="sidebar-foot">{live
             ? <><b>LIVE</b> · real network<br />Only the approved scan scope is contacted.</>
-            : <><b>POC</b> · simulated OT network<br />No real devices are contacted.</>}</div>
+            : <><b>TEST</b> · simulated network<br />Test suite only.</>}</div>
         </aside>
         <div className="main-content">
           <header className="top-bar">

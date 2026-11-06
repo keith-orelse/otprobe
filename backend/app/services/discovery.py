@@ -35,8 +35,8 @@ def _validate_targets(ctx: AppContext, session: Session, targets: list[str]) -> 
             if ctx.settings.live:
                 raise ProblemError(422, "target-out-of-scope", "Target outside the scan scope",
                                    f"{t} is not inside an approved scan scope entry")
-            raise ProblemError(422, "target-not-in-simulated-network", "Target outside the simulated network",
-                               f"{t} is not inside a configured zone. OTProbe never scans real networks.")
+            raise ProblemError(422, "target-not-in-zone", "Target outside the configured zones",
+                               f"{t} is not inside a configured zone")
         if not zone.scannable:
             raise ProblemError(422, "zone-not-scannable", "Zone is not scannable", f"{zone.name} is never scanned")
         normalized.append(str(net))

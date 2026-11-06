@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import AsyncIterator
 
 from app.adapters.base import AdapterResult, DiscoveredHost, Query, ResultStatus, SshAdapter, StageCallback, Target
-from app.adapters.simulated.common import SimAdapterMixin, account_ok
+from tests.sim.adapters.common import SimAdapterMixin, account_ok
 
 
 class SimulatedSshAdapter(SimAdapterMixin, SshAdapter):

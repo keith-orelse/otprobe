@@ -113,9 +113,6 @@ export function NetworkMap() {
             </tbody></table>
           ) : <p className="muted">Select a node. The graph shows only what OTProbe has observed: physical links come from the
             switch's LLDP/FDB table (after probing it), flows from WMI netstat and MQTT.</p>}
-          {topo.data?.nodes.filter((n) => n.kind === "conduit").map((c) => (
-            <p key={c.id} className="hint">{c.label} is the single simulated conduit between the DMZ and Level 2 and below
-              (a deliberate simplification).</p>))}
         </Panel>
       </div>
     </div>

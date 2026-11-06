@@ -92,9 +92,15 @@ def test_adapter_interfaces_are_abstract() -> None:
         assert inspect.isabstract(cls), f"{name} must be abstract"
 
 
-@pytest.mark.parametrize("package", ["sim", "adapters/simulated"])
-def test_simulated_code_has_no_network_imports(package: str) -> None:
-    for path in (APP_DIR / package).rglob("*.py"):
+SIM_DIR = Path(__file__).resolve().parents[1] / "sim"
+
+
+def test_simulated_code_has_no_network_imports() -> None:
+    """The in-process simulator never touches a network. (tests/sim/agent and tests/sim/telemetry are the separate
+    agent-runtime and telemetry-simulator processes: they talk HTTP to the API on loopback by design.)"""
+    for path in SIM_DIR.rglob("*.py"):
+        if path.relative_to(SIM_DIR).parts[0] in ("agent", "telemetry"):
+            continue
         tree = ast.parse(path.read_text())
         for node in ast.walk(tree):
             names = []
@@ -104,3 +110,14 @@ def test_simulated_code_has_no_network_imports(package: str) -> None:
                 names = [node.module]
             for n in names:
                 assert n.split(".")[0] not in FORBIDDEN_IMPORTS, f"{path}: forbidden import {n}"
+
+
+def test_product_never_imports_the_test_suite() -> None:
+    """The simulator lives in tests/sim (phase L6): nothing under app/ may import it, or anything else from tests."""
+    for path in APP_DIR.rglob("*.py"):
+        for node in ast.walk(ast.parse(path.read_text())):
+            names = [a.name for a in node.names] if isinstance(node, ast.Import) else \
+                [node.module] if isinstance(node, ast.ImportFrom) and node.module else []
+            for n in names:
+                assert n.split(".")[0] != "tests", f"{path}: imports {n}"
+    assert not (APP_DIR / "sim").exists() and not (APP_DIR / "adapters" / "simulated").exists()

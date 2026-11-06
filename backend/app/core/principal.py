@@ -7,8 +7,7 @@ from app.core.audit import Actor
 PERMISSIONS = {
     "OPERATOR": ["discovery.start", "probe.start", "deployment.request", "deployment.operate"],
     "APPROVER": ["approval.decide"],
-    "ADMIN": ["discovery.start", "probe.start", "deployment.request", "deployment.operate", "approval.decide",
-              "demo.control"],
+    "ADMIN": ["discovery.start", "probe.start", "deployment.request", "deployment.operate", "approval.decide"],
 }
 
 

@@ -23,8 +23,9 @@ Related design documents:
 
 Existing documents that stay valid: [RULES.md](RULES.md), [STATE_MACHINES.md](STATE_MACHINES.md),
 [PROVENANCE.md](PROVENANCE.md), [DATA_MODEL.md](DATA_MODEL.md) (with the changes in §6 below).
-[SIMULATED_NETWORK.md](SIMULATED_NETWORK.md), [FAILURE_MATRIX.md](FAILURE_MATRIX.md) and the demo/testing guides
-move to the `simulated` branch only.
+`SIMULATED_NETWORK.md`, `DEMO_SCRIPT.md` and the simulated testing guides are on the `simulated` branch only
+(removed here in L6). [FAILURE_MATRIX.md](FAILURE_MATRIX.md) stays: it is the specification of the test simulator's
+faults, and acceptance H checks every row.
 
 ---
 
@@ -36,9 +37,10 @@ move to the `simulated` branch only.
 | `main` | OTProbe Live (after review, merged from `real-network`) | Real-network product |
 | `real-network` | Work in progress for phases L1–L6 | Merged into `main` after each approved phase |
 
-`main` contains **no simulator**: no `app/sim`, no `sim_*` tables, no `/sim/v1`, no Demo Controls, no
-`agent-runtime` or `telemetry-sim`. The adapter registry keeps its interface, so a test fake can still be
-registered inside the test suite (see [LIVE_TEST_PLAN.md](LIVE_TEST_PLAN.md) §2).
+`main` contains **no simulator** in the product: no `app/sim`, no `sim_*` tables (dropped by migration 0008), no
+`/sim/v1`, no Demo Controls, no `agent-runtime` or `telemetry-sim` containers. Since L6 the simulator lives only in
+the test suite (`backend/tests/sim`). The tests plug it in through `create_app(..., environment=SimEnvironment())`;
+the server refuses any mode other than `real` without that (DECISIONS.md L6-1).
 
 ---
 
@@ -255,4 +257,4 @@ Each phase ends with a review stop, as before.
 | **L3** ✅ | Agentless: WinRM/WMI (read-only), SSH (read-only, host-key pinning), OT identification plugins (Modbus, S7, EtherNet/IP, BACnet, OPC UA, web title), classification signals, plugin selection per scope entry | Live tests against real Modbus/OPC UA/SSH/TLS servers and recording fake S7/ENIP/BACnet devices; Windows on a lab host |
 | **L4** ✅ | Go agent (Windows, Linux, macOS; legacy Windows/Linux builds on Go 1.20), signed release pipeline and verification, WinRM install/uninstall, real deployment, enrollment over pinned TLS, removal and restart. Manual one-liner install and Linux deployment over SSH moved to L6 | Go unit tests; the real Go agent through the deployment workflow on 127.0.0.1; Windows laptop by hand (docs/TESTING_L4.md) |
 | **L5** ✅ (rules) | Real assessments from Go agent evidence, Linux baseline, new Windows rules, drift on real hosts, generic Windows classification. **Bundled Mosquitto, telemetry sources and broker checks deferred** (decided 2026-11-05) | Rule-engine tests on Go-agent-shaped evidence; Windows laptop by hand (docs/TESTING_L5.md) |
-| **L6** | Simulator moved out of `app/` into the test suite; full lab campaign (acceptance + failure matrix), packet-capture verification, docs, pilot runbook | [LIVE_TEST_PLAN.md](LIVE_TEST_PLAN.md) |
+| **L6** | ✅ Simulator moved out of `app/` into the test suite (L6-1). Still to do: Linux deployment over SSH, manual one-liner install, WinRM certificate pinning, user management; full lab campaign (acceptance + failure matrix), packet-capture verification, docs, pilot runbook | [LIVE_TEST_PLAN.md](LIVE_TEST_PLAN.md) |

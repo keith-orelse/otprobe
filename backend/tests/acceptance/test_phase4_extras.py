@@ -80,7 +80,7 @@ async def test_scheduler_and_timeout(db_path, tmp_path):
         assert dash["monitoring"][0]["agentStatus"] == "ONLINE" and dash["monitoring"][0]["score"] == 75.0
         findings_before = (await h.get("/findings"))["total"]
 
-        h.ctx.sim_control.set_fault("dev-ews01", "assessment_timeout", {}, "test")
+        h.ctx.extras["sim_control"].set_fault("dev-ews01", "assessment_timeout", {}, "test")
         await h.wait_for(f"/assets/{asset_id}", lambda a: a["compliance"]["runAction"]["enabled"], timeout=10)
         run = await assess(h, asset_id, until=("TIMED_OUT", "EVALUATED"))
         assert run["status"] == "TIMED_OUT" and "no evidence received" in run["error"]

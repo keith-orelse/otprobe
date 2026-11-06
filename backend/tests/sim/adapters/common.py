@@ -4,8 +4,8 @@ from typing import Any
 
 from app.adapters.base import AdapterDescriptor, AdapterResult, Credential, Protocol, ResultStatus, Stage
 from app.core.clock import utcnow
-from app.sim.latency import SimLatency
-from app.sim.world import DeviceView, SimWorld
+from tests.sim.latency import SimLatency
+from tests.sim.world import DeviceView, SimWorld
 
 
 class SimAdapterMixin:

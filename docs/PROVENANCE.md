@@ -113,4 +113,4 @@ Example for eng-ws-01 (acceptance B):
 confidence (`min_confidence`).
 
 Eligibility (`rules/eligibility.yaml`) is evaluated after classification, using the type, OS family and
-criticality. See [SIMULATED_NETWORK.md §2.3](SIMULATED_NETWORK.md#23-agent-eligibility-derived-by-otprobe-not-stored-in-the-simulator).
+criticality. See `SIMULATED_NETWORK.md` §2.3 on the `simulated` branch.
