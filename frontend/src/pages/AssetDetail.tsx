@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { apiAction, apiGet } from "../api";
+import { useMe } from "../auth";
 import { ago, ErrorBox, Panel, Pill, SourceBadge, StepList, time, Value } from "../components/ui";
 import type { Agent, AssessmentRun, AssetDetail as Asset, Deployment, Finding, Package, Page, ProbeRun } from "../types";
 import { DeviceIcon, LevelBadge } from "../components/visual";
@@ -89,6 +90,7 @@ export function AssetDetail() {
       <ErrorBox error={run.error ?? assess.error} />
       {requesting && <DeployRequest asset={a} onClose={() => setRequesting(false)} />}
       {a.currentAgentId && <AgentStrip id={a.currentAgentId} />}
+      <PinnedKeys asset={a} />
       {a.notes.map((n) => <div key={n} className="note">{n}</div>)}
 
       <nav className="tabs" role="tablist" aria-label="Asset sections">
@@ -171,6 +173,35 @@ export function AssetDetail() {
 function isoLocal(d: Date): string {
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/** The SSH host key and WinRM certificate OTProbe pinned on first contact. Installs only log in to these; an admin
+ *  can forget them after checking the host (for example after a reinstall). */
+function PinnedKeys({ asset }: { asset: Asset }) {
+  const qc = useQueryClient();
+  const me = useMe();
+  const [reason, setReason] = useState("");
+  const ssh = fieldValue(asset, "ssh.host_key") as string | undefined;
+  const cert = fieldValue(asset, "services.winrm.cert_sha256") as string | undefined;
+  const reset = useMutation({
+    mutationFn: () => apiAction(`/assets/${asset.id}/trust/reset`, { reason }),
+    onSuccess: () => { setReason(""); qc.invalidateQueries({ queryKey: ["asset", asset.id] }); },
+  });
+  if (!ssh && !cert) return null;
+  const short = (v: unknown) => { const t = String(v); return t.length > 40 ? `${t.slice(0, 20)}…${t.slice(-16)}` : t; };
+  return (
+    <div className="note">
+      <b>Pinned identity</b>{cert && <> · WinRM certificate SHA-256 <span className="mono">{short(cert)}</span></>}
+      {ssh && <> · SSH host key <span className="mono">{short(ssh)}</span></>}. Installs and removals only log in to this
+      exact host.
+      {me.data?.role === "ADMIN" && <span className="inline-form">
+        {" "}<input placeholder="Reason (e.g. host reinstalled, checked on site)" value={reason}
+          onChange={(e) => setReason(e.target.value)} />
+        <button className="btn btn-sm" disabled={reason.trim().length < 3 || reset.isPending}
+          onClick={() => reset.mutate()}>Forget pinned keys</button></span>}
+      <ErrorBox error={reset.error} />
+    </div>
+  );
 }
 
 const GOARCH: Record<string, string> = { x86_64: "amd64", amd64: "amd64", aarch64: "arm64", arm64: "arm64",

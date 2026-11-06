@@ -1,8 +1,10 @@
 from fastapi import APIRouter, Depends
 
 from app import schemas
-from app.api.deps import CursorQ, LimitQ, any_user, get_ctx
+from app.api.deps import CursorQ, LimitQ, admin_only, any_user, get_ctx
 from app.context import AppContext
+from app.core.idempotency import Idempotency, require_idempotency
+from app.core.principal import CurrentUser
 from app.services import assets
 
 router = APIRouter(prefix="/assets", tags=["assets"], dependencies=[Depends(any_user)])
@@ -27,3 +29,9 @@ async def get_asset(asset_id: str, ctx: AppContext = Depends(get_ctx)):
 async def fields(asset_id: str, stage: str | None = None, ctx: AppContext = Depends(get_ctx)):
     with ctx.db.session() as s:
         return assets.list_fields(s, ctx.registry, asset_id, stage)
+
+
+@router.post("/{asset_id}/trust/reset", summary="Forget the pinned SSH host key and WinRM certificate (admin)")
+async def reset_trust(asset_id: str, req: schemas.SafetyReason, user: CurrentUser = Depends(admin_only),
+                      idem: Idempotency = Depends(require_idempotency), ctx: AppContext = Depends(get_ctx)):
+    return idem.execute(ctx.db, 200, lambda s: assets.reset_trust(s, asset_id, req.reason, user.actor))

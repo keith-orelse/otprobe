@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+from typing import Any
+
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app import schemas
 from app.adapters.base import Protocol
 from app.adapters.registry import AdapterRegistry
+from app.core import audit, events
 from app.core.errors import ProblemError, not_found
 from app.core.fields import GROUP_OF, GROUPS
 from app.engines.inventory import effective_fields
@@ -110,3 +113,24 @@ def list_fields(session: Session, registry: AdapterRegistry, asset_id: str, stag
     if stage:
         stmt = stmt.where(AssetField.stage == stage)
     return [field_value(registry, r) for r in session.scalars(stmt)]
+
+
+TRUST_FIELDS = ("ssh.host_key", "services.winrm.cert_sha256")
+
+
+def reset_trust(session: Session, asset_id: str, reason: str, actor) -> tuple[dict[str, Any], None]:
+    """Forget the SSH host key and WinRM certificate pinned for an asset (e.g. after a legitimate reinstall). The next
+    probe pins whatever the host presents then, so an admin should check the host first. Audited with the old values."""
+    asset = session.get(Asset, asset_id)
+    if asset is None:
+        raise not_found("Asset", asset_id)
+    rows = list(session.scalars(select(AssetField).where(AssetField.asset_id == asset_id,
+                                                         AssetField.field_path.in_(TRUST_FIELDS))))
+    if not rows:
+        raise ProblemError(409, "nothing-pinned", "Nothing to reset", "No SSH host key or WinRM certificate is pinned")
+    cleared = {r.field_path: r.value for r in rows}
+    for r in rows:
+        session.delete(r)
+    audit.record(session, actor, "ASSET_TRUST_RESET", "asset", asset_id, {"reason": reason, "cleared": cleared})
+    events.stage(session, "asset.updated", "asset", asset_id, {})
+    return {"assetId": asset_id, "cleared": sorted(cleared)}, None

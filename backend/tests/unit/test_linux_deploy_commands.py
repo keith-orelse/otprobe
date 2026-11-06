@@ -100,3 +100,12 @@ def test_platform_and_eligibility_for_linux():
     assert eligibility({**host, **ssh}, book)[0] == "ELIGIBLE"
     assert eligibility(host, book)[0] == "NOT_ELIGIBLE"
     assert eligibility({**host, **ssh, "asset": {"criticality": "CRITICAL"}}, book)[0] == "REVIEW_REQUIRED"
+
+
+def test_windows_install_sessions_require_the_pinned_certificate():
+    from app.adapters.base import ResultStatus
+    opts = WINDOWS.options({"services.winrm.cert_sha256": "ab" * 32})
+    assert opts == {"cert_sha256": "ab" * 32, "require_cert_pin": True}
+    assert WINDOWS.options({})["cert_sha256"] is None                    # no pin: the adapter refuses to log in
+    assert WINDOWS.event(ResultStatus.TLS_INVALID, "CERT_CHANGED") == "WINRM_CERT_CHANGED"
+    assert WINDOWS.event(ResultStatus.TLS_INVALID) == "WINRM_TLS_INVALID"

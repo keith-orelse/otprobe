@@ -195,6 +195,7 @@ class ProbeEngine:
 
         # WinRM + WMI
         session = None
+        winrm_options: dict[str, Any] = {}       # carries the pinned certificate from the session to WMI
         winrm = reg.get(Protocol.WINRM)
         winrm_port = await self._port("OT-WINDOWS-READONLY", 5986)
         tracker.start("WINRM", f"{'HTTP' if winrm_port == 5985 else 'HTTPS'} {ip}:{winrm_port}")
@@ -224,22 +225,31 @@ class ProbeEngine:
                     stages.append({"name": st.name, "status": st.status.value, "detail": st.detail})
                     tracker.update("WINRM", f"{st.name}: {st.detail}", data={"stages": list(stages)})
 
-                res, session = await winrm.open_session(Target(ip, port=winrm_port, credential=cred), on_stage)
+                cert_pin = known.get("services.winrm.cert_sha256")
+                if cert_pin:
+                    winrm_options = {"cert_sha256": cert_pin}
+                res, session = await winrm.open_session(Target(ip, port=winrm_port, credential=cred,
+                                                               options=winrm_options), on_stage)
                 record(res)
+                if not cert_pin and res.data.get("services.winrm.cert_sha256"):
+                    winrm_options = {"cert_sha256": res.data["services.winrm.cert_sha256"]}
+                    self._audit(asset_id, "WINRM_CERT_PINNED",
+                                f"Trusted on first use: SHA-256 {res.data['services.winrm.cert_sha256']}")
                 if session is not None:
                     tracker.ok("WINRM", f"Session created as {cred.username} (profile {cred.profile})",
                                {"stages": stages})
                 else:
                     failed.append("WINRM")
                     tracker.fail("WINRM", res.error_detail or res.status.value, {"stages": stages})
-                    self._audit(asset_id, winrm_event(res.status), res.error_detail)
+                    self._audit(asset_id, "WINRM_CERT_CHANGED" if res.error_code == "CERT_CHANGED"
+                                else winrm_event(res.status), res.error_detail)
 
         tracker.start("WMI", "CIM queries over WinRM")
         if session is None:
             tracker.skip("WMI", SAFE_MODE_SKIP if safe else "Requires a WinRM session")
         else:
-            res = record(await reg.get(Protocol.WMI).probe(Target(ip, port=winrm_port, credential=cred),
-                                                           Query(WMI_GROUPS)))
+            res = record(await reg.get(Protocol.WMI).probe(Target(ip, port=winrm_port, credential=cred,
+                                                                  options=winrm_options), Query(WMI_GROUPS)))
             await winrm.close_session(session)
             if res.ok:
                 tracker.ok("WMI", f"Collected {', '.join(WMI_GROUPS)} ({len(res.data)} fields)")

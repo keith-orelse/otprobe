@@ -16,6 +16,7 @@ GROUPS: dict[str, list[str]] = {
            "plc.mode", "plc.cpu"],
     "Software": ["software.installed"],
     "Services": ["services.running", "services.winrm.available", "services.winrm.port", "services.winrm.tls",
+                 "services.winrm.cert_sha256",
                  "services.ssh.available", "services.ssh.banner", "ssh.host_key", "services.snmp.available"],
     "Firewall": ["firewall.state", "firewall.profiles", "firewall.default_inbound", "firewall.rule_count"],
     "Antivirus": ["antivirus.product", "antivirus.state", "antivirus.signature_age_days", "antivirus.realtime"],

@@ -154,7 +154,7 @@ class DeploymentEngine:
                     f", but cannot act as root: {r.error_detail}. Use root, or an account with sudo"
             record("AUTHENTICATION", "PASS" if ok else "FAIL", detail)
             if session is None:
-                self._audit(dep_id, platform.event(res.status), res.error_detail)
+                self._audit(dep_id, platform.event(res.status, res.error_code), res.error_detail)
         else:
             record("AUTHENTICATION", "FAIL", f"{platform.label} not available")
 
@@ -278,7 +278,7 @@ class DeploymentEngine:
                                                         options=platform.options(fields)), on_stage)
         if session is None:
             return self._fail(dep_id, tracker, session_step, f"{platform.access}_{res.status.value}",
-                              res.error_detail or res.status.value, platform.event(res.status))
+                              res.error_detail or res.status.value, platform.event(res.status, res.error_code))
         tracker.ok(session_step, f"Session created as {cred.username} (vault profile {profile})", {"stages": stages})
 
         try:

@@ -64,7 +64,7 @@ To deploy the Go agent, the API must run over HTTPS so agents can pin its CA. St
 | Compliance | Rules as YAML: Windows and Linux baselines, scoring with UNKNOWN excluded, findings lifecycle, drift, agentless vs deep comparison |
 | Platform | REST `/api/v1`, Swagger at `/docs`, RFC 7807 errors, idempotency keys, SSE, hash-chained audit log, Alembic migrations |
 
-Not built yet: manual one-line install, WinRM certificate pinning, user management, and the bundled MQTT broker (see the phase table in [docs/LIVE_ARCHITECTURE.md](docs/LIVE_ARCHITECTURE.md)).
+Not built yet: manual one-line install, user management, and the bundled MQTT broker (see the phase table in [docs/LIVE_ARCHITECTURE.md](docs/LIVE_ARCHITECTURE.md)).
 
 ## Tests
 

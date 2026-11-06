@@ -1,9 +1,12 @@
-"""Real WinRM and WMI/CIM (over WinRM) adapters. Read-only in phase L3: remote operations that change a host (agent
-install, service start/stop, file removal) answer NOT_SUPPORTED until phase L4. The JSON-to-fields mapping lives
-in small pure functions, unit-tested on recorded output from Windows 11, Server 2022 and a host without Defender."""
+"""Real WinRM and WMI/CIM (over WinRM) adapters. Probes are read-only; the deployment scripts (phase L4) are a separate
+closed set. The server certificate is pinned (phase L6): ``target.options["cert_sha256"]`` is the fingerprint an
+earlier probe recorded, and every connection of a session must present it (see net/winrm.py). The JSON-to-fields
+mapping lives in small pure functions, unit-tested on recorded output from Windows 11, Server 2022 and a host without
+Defender."""
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Any, AsyncIterator, Mapping
 
@@ -29,7 +32,8 @@ from app.core.ids import new_id
 
 STATUS = {"OK": ResultStatus.OK, "REFUSED": ResultStatus.REFUSED, "TIMEOUT": ResultStatus.TIMEOUT,
           "TLS_INVALID": ResultStatus.TLS_INVALID, "AUTH_FAILED": ResultStatus.AUTH_FAILED,
-          "DISABLED": ResultStatus.DISABLED, "ERROR": ResultStatus.ERROR}
+          "DISABLED": ResultStatus.DISABLED, "ERROR": ResultStatus.ERROR, "CERT_CHANGED": ResultStatus.TLS_INVALID,
+          "NO_CERT_PIN": ResultStatus.ERROR}
 WMI_GROUPS = ("os", "hardware", "firewall", "antivirus", "software", "services", "hotfixes", "network")
 READ_ONLY_OPS = {RemoteOperation.QUERY_HOSTNAME: "q_hostname", RemoteOperation.QUERY_DISK_FREE: "q_disk_free",
                  RemoteOperation.QUERY_REBOOT_PENDING: "q_reboot_pending",
@@ -132,6 +136,7 @@ class RealWinRmAdapter(RealAdapterMixin, WinRmAdapter):
     def __init__(self, gate) -> None:
         super().__init__(gate)
         self._sessions: dict[str, Target] = {}
+        self._pins: dict[str, str | None] = {}      # session id -> certificate fingerprint every connection must match
 
     async def discover(self, target: Target) -> AsyncIterator[DiscoveredHost]:
         return
@@ -161,21 +166,25 @@ class RealWinRmAdapter(RealAdapterMixin, WinRmAdapter):
             if on_stage is not None:
                 await on_stage(st)
 
+        pin = target.options.get("cert_sha256")
         try:
             reply = await winrm.open_session(self.gate, ip, port, target.credential, min(target.timeout_sec, 5.0),
-                                             emit)
+                                             emit, pin, bool(target.options.get("require_cert_pin")))
         except GateBlocked as exc:
             return self.blocked(ip, exc), None
-        tls = port != 5985 and not target.credential.params.get("http")
+        tls = winrm.uses_tls(port, target.credential)
         data = {"services.winrm.available": reply.stage != "CONNECTING", "services.winrm.port": port}
-        if tls and reply.stage != "CONNECTING":
-            data["services.winrm.tls"] = "invalid" if reply.status == "TLS_INVALID" else \
+        if tls and reply.stage != "CONNECTING" and reply.status != "NO_CERT_PIN":
+            data["services.winrm.tls"] = "invalid" if reply.status in ("TLS_INVALID", "CERT_CHANGED") else \
                 "unverified" if target.credential.params.get("skipCertCheck") else "valid"
+        if reply.cert_sha256 and reply.status != "CERT_CHANGED":
+            data["services.winrm.cert_sha256"] = reply.cert_sha256       # recorded once the TLS stage has passed
         if reply.status != "OK":
-            return self.result(ip, STATUS[reply.status], data, error_code=reply.status,
-                               error_detail=reply.detail), None
+            return self.result(ip, STATUS[reply.status], data, raw={"seen_cert_sha256": reply.cert_sha256},
+                               error_code=reply.status, error_detail=reply.detail), None
         sid = new_id()
         self._sessions[sid] = target
+        self._pins[sid] = pin or reply.cert_sha256 or None
         return self.result(ip, ResultStatus.OK, data, raw={"psVersion": reply.output}), RemoteSession(sid, ip, stages)
 
     async def execute(self, session: RemoteSession, op: RemoteOperation, params: Mapping[str, Any]) -> AdapterResult:
@@ -188,6 +197,7 @@ class RealWinRmAdapter(RealAdapterMixin, WinRmAdapter):
         try:
             if op in READ_ONLY_OPS:
                 return await self._query(session, target, op, params)
+            target = replace(target, options={**target.options, "cert_sha256": self._pins.get(session.session_id)})
             return await self._deploy_op(session, target, op, params)
         except GateBlocked as exc:
             return self.blocked(session.target, exc)
@@ -197,7 +207,7 @@ class RealWinRmAdapter(RealAdapterMixin, WinRmAdapter):
 
     async def _query(self, session, target, op, params) -> AdapterResult:
         reply = await winrm.run(self.gate, target.address, _port(target), target.credential, READ_ONLY_OPS[op],
-                                min(target.timeout_sec, 5.0), dict(params))
+                                min(target.timeout_sec, 5.0), dict(params), pin=self._pins.get(session.session_id))
         if reply.status != "OK":
             return self.result(session.target, STATUS[reply.status], error_code=reply.status, error_detail=reply.detail)
         out = reply.output.strip()
@@ -223,7 +233,8 @@ class RealWinRmAdapter(RealAdapterMixin, WinRmAdapter):
 
     async def _script(self, target: Target, name: str, params: dict) -> winrm.WinRmReply:
         return await winrm.run(self.gate, target.address, _port(target), target.credential, name,
-                               min(target.timeout_sec * 6, 120.0), params, deploy=True)
+                               min(target.timeout_sec * 6, 120.0), params, deploy=True,
+                               pin=target.options.get("cert_sha256"))
 
     async def _deploy_op(self, session, target, op, params) -> AdapterResult:
         """Operations that change the host: agent install, service start/stop, uninstall, staging clean-up."""
@@ -270,14 +281,17 @@ class RealWinRmAdapter(RealAdapterMixin, WinRmAdapter):
         target = self._sessions.get(session.session_id)
         if target is None:
             return winrm.WinRmReply("ERROR", detail="WinRM session is closed")
+        pin = self._pins.get(session.session_id)
+        target = replace(target, options={**target.options, "cert_sha256": pin})
         made = await self._script(target, "make_staging", {})
         if made.status != "OK":
             return made
         return await winrm.copy_file(self.gate, target.address, _port(target), target.credential, local,
-                                     _win(remote), min(target.timeout_sec, 10.0))
+                                     _win(remote), min(target.timeout_sec, 10.0), pin)
 
     async def close_session(self, session: RemoteSession) -> None:
         self._sessions.pop(session.session_id, None)
+        self._pins.pop(session.session_id, None)
 
     async def probe(self, target: Target, query: Query, on_stage: StageCallback | None = None) -> AdapterResult:
         return await self.health_check(target)
@@ -302,11 +316,12 @@ class RealWmiAdapter(RealAdapterMixin, WmiAdapter):
         failed: dict[str, str] = {}
         for group in query.items or WMI_GROUPS:
             try:
-                reply = await winrm.run(self.gate, ip, port, target.credential, group, min(target.timeout_sec, 10.0))
+                reply = await winrm.run(self.gate, ip, port, target.credential, group, min(target.timeout_sec, 10.0),
+                                        pin=target.options.get("cert_sha256"))
             except GateBlocked as exc:
                 return self.blocked(ip, exc)
             if reply.status != "OK":
-                if not data and reply.status in ("AUTH_FAILED", "REFUSED", "TIMEOUT", "TLS_INVALID"):
+                if not data and reply.status in ("AUTH_FAILED", "REFUSED", "TIMEOUT", "TLS_INVALID", "CERT_CHANGED"):
                     return self.result(ip, STATUS[reply.status], error_code=reply.status,
                                        error_detail=f"CIM session failed: {reply.detail}")
                 failed[group] = reply.detail

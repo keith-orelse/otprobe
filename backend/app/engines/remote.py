@@ -28,15 +28,16 @@ class Platform:
     hash_command: str           # shown in the VERIFY_HASH step
 
     def options(self, fields: dict[str, Any]) -> dict[str, Any]:
-        """Session options: SSH sessions only log in to the host key pinned by an earlier probe."""
+        """Session options: install, removal and restart sessions only log in to the host whose SSH key or WinRM
+        certificate an earlier probe pinned (no pin, no login)."""
         if self.protocol == Protocol.SSH:
             return {"host_key": fields.get("ssh.host_key")}
-        return {}
+        return {"cert_sha256": fields.get("services.winrm.cert_sha256"), "require_cert_pin": True}
 
-    def event(self, status: ResultStatus) -> str:
+    def event(self, status: ResultStatus, code: str | None = None) -> str:
         if self.protocol == Protocol.SSH:
             return SSH_EVENTS.get(status, f"SSH_{status.value}")
-        return winrm_event(status)
+        return "WINRM_CERT_CHANGED" if code == "CERT_CHANGED" else winrm_event(status)
 
 
 SSH_EVENTS = {ResultStatus.REFUSED: "SSH_CONNECTION_REFUSED", ResultStatus.TIMEOUT: "SSH_TIMEOUT",

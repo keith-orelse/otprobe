@@ -146,8 +146,14 @@ Eligibility (`rules/eligibility.yaml`) maps class + OS to an **agent profile** o
   firewall rule set is unreadable, so only an *active* firewall service is reported; an inactive one stays UNKNOWN.
 - **WinRM:** read-only PowerShell scripts by name, parameters validated by strict patterns. Needs PowerShell 3.0+
   (stock Windows 7 / 2008 R2 has 2.0: reported clearly, covered by the Go agent in L4). Certificate chains are
-  verified by OTProbe before pypsrp connects (without hostname matching, as targets are addressed by IP); pinning
-  the certificate inside the pypsrp session is tracked for L6. Operations that change a host answer NOT_SUPPORTED
-  until L4.
+  verified by OTProbe before pypsrp connects (without hostname matching, as targets are addressed by IP), or skipped
+  when the profile says so. **Certificate pinning (L6):** the first probe records the certificate's SHA-256
+  (`services.winrm.cert_sha256`, audit `WINRM_CERT_PINNED`). From then on every connection (probe, CIM queries,
+  precheck, install, file copy, removal, restart) must present that certificate: it is checked in the TLS stage and
+  again inside each pypsrp connection (urllib3 `assert_fingerprint`), in the handshake, before any credential is
+  sent. Even on first contact, the pypsrp connections must match the certificate the TLS stage just saw. A different
+  certificate is refused (`WINRM_CERT_CHANGED`) and the pin is kept. Install, removal and restart sessions over
+  HTTPS need a pin (run a probe first). An admin can clear the pins of an asset after checking the host
+  (`POST /assets/{id}/trust/reset`, audited as `ASSET_TRUST_RESET`, also clears the SSH host key).
 - **Non-standard ports:** a credential profile's `params.port` sets the SNMP, SSH or WinRM port (5985 = HTTP with
   message encryption, anything else = HTTPS).

@@ -6,9 +6,11 @@ CONNECTING -> TCP_OK (connect) -> TLS_VALIDATED (HTTPS: certificate chain agains
 store) -> AUTH_OK + SESSION_CREATED (a trivial script runs).
 
 TLS: the certificate chain is verified by ``check_tls`` (against the profile's ``params.caPem`` or the system store,
-without hostname matching because targets are addressed by IP). pypsrp's own connection then runs with certificate
-validation off, moments later. That leaves a short window in which an attacker able to intercept could swap the
-server; pinning the certificate fingerprint inside the pypsrp session closes it and is tracked for phase L6.
+without hostname matching because targets are addressed by IP), or skipped when the profile says so. Either way the
+certificate is PINNED (phase L6): ``check_tls`` records its SHA-256 and refuses one that differs from the pin the
+caller passes (the fingerprint an earlier probe recorded). Every pypsrp connection afterwards (commands, file copy)
+must present that same certificate: urllib3 compares the fingerprint during the handshake, before any HTTP request
+and so before any credential is sent. A server swapped between the check and the session is refused.
 
 Scripts need PowerShell 3.0+ (ConvertTo-Json); hosts with only PowerShell 2.0 (stock Windows 7 / 2008 R2) report
 "PowerShell 3.0 or later required" and stay agentless-partial until the Go agent (L4) covers them."""
@@ -16,6 +18,7 @@ Scripts need PowerShell 3.0+ (ConvertTo-Json); hosts with only PowerShell 2.0 (s
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import re
 import ssl
@@ -149,11 +152,13 @@ def render_deploy(name: str, params: dict) -> str:
 
 @dataclass
 class WinRmReply:
-    status: str          # OK | REFUSED | TIMEOUT | TLS_INVALID | AUTH_FAILED | DISABLED | ERROR
+    # OK | REFUSED | TIMEOUT | TLS_INVALID | CERT_CHANGED | NO_CERT_PIN | AUTH_FAILED | DISABLED | ERROR
+    status: str
     stage: str = ""      # the stage that failed
     output: str = ""
     errors: list[str] = field(default_factory=list)
     detail: str = ""
+    cert_sha256: str = ""    # the server certificate's fingerprint, once the TLS stage has seen it
 
 
 def render(name: str, params: dict | None = None) -> str:
@@ -179,19 +184,35 @@ def _tls_context(cred: Credential) -> ssl.SSLContext:
     return ctx
 
 
-async def check_tls(gate: NetworkGate, ip: str, port: int, cred: Credential, timeout_sec: float) -> tuple[bool, str]:
+def cert_sha256(der: bytes) -> str:
+    return hashlib.sha256(der).hexdigest()
+
+
+def short(fingerprint: str) -> str:
+    return f"{fingerprint[:8]}…{fingerprint[-8:]}" if fingerprint else "?"
+
+
+async def check_tls(gate: NetworkGate, ip: str, port: int, cred: Credential, timeout_sec: float,
+                    pin: str | None = None) -> tuple[str, str, str]:
+    """(status, detail, fingerprint). status: OK | TLS_INVALID | CERT_CHANGED (the pin does not match)."""
     async with gate.permit(ip, "TLS_HANDSHAKE"):
         try:
             _, writer = await asyncio.wait_for(asyncio.open_connection(ip, port, ssl=_tls_context(cred)), timeout_sec)
         except ssl.SSLCertVerificationError as exc:
-            return False, f"TLS certificate validation failed: {exc.verify_message}"
+            return "TLS_INVALID", f"TLS certificate validation failed: {exc.verify_message}", ""
         except (ssl.SSLError, OSError, asyncio.TimeoutError) as exc:
-            return False, f"TLS handshake failed: {exc}"
+            return "TLS_INVALID", f"TLS handshake failed: {exc}", ""
         der = writer.get_extra_info("ssl_object").getpeercert(binary_form=True)
         writer.close()
-    subject = _common_name(der)
+    subject, fingerprint = _common_name(der), cert_sha256(der or b"")
+    if pin and fingerprint != pin.lower():
+        detail = (f"Server certificate changed (CN={subject}): expected SHA-256 {short(pin)}, "
+                  f"got {short(fingerprint)}. Not logging in. If the host was legitimately reinstalled or its "
+                  "certificate renewed, an admin can clear the pinned keys after checking")
+        return "CERT_CHANGED", detail, fingerprint
     note = " (validation skipped by profile)" if cred.params.get("skipCertCheck") else ""
-    return True, f"Server certificate chain trusted (CN={subject}){note}"
+    pinned = f", matches the pinned SHA-256 {short(pin)}" if pin else f", SHA-256 {short(fingerprint)} pinned"
+    return "OK", f"Server certificate chain trusted (CN={subject}){note}{pinned}", fingerprint
 
 
 def _common_name(der: bytes | None) -> str:
@@ -202,19 +223,31 @@ def _common_name(der: bytes | None) -> str:
     return str(names[0].value) if names else "?"
 
 
-def _client(ip: str, port: int, cred: Credential, timeout_sec: float) -> Client:
-    tls = port != 5985 and not cred.params.get("http")
-    return Client(ip, port=port, username=cred.username, password=cred.secret, ssl=tls,
-                  cert_validation=False,   # the chain is verified by check_tls during open_session (module doc)
-                  auth=cred.params.get("auth", "negotiate"), connection_timeout=int(timeout_sec),
-                  operation_timeout=max(20, int(timeout_sec) * 4), read_timeout=max(30, int(timeout_sec) * 5),
-                  encryption="auto")
+def uses_tls(port: int, cred: Credential) -> bool:
+    return port != 5985 and not cred.params.get("http")
+
+
+def _client(ip: str, port: int, cred: Credential, timeout_sec: float, pin: str | None = None) -> Client:
+    tls = uses_tls(port, cred)
+    client = Client(ip, port=port, username=cred.username, password=cred.secret, ssl=tls,
+                    cert_validation=False,   # the chain is verified by check_tls; the pin is enforced below
+                    auth=cred.params.get("auth", "negotiate"), connection_timeout=int(timeout_sec),
+                    operation_timeout=max(20, int(timeout_sec) * 4), read_timeout=max(30, int(timeout_sec) * 5),
+                    encryption="auto")
+    if tls and pin:
+        # urllib3 checks the server certificate's SHA-256 in the handshake of every connection this client opens.
+        transport = client.wsman.transport
+        transport.session = transport._build_session()
+        transport.session.get_adapter(f"https://{ip}").poolmanager.connection_pool_kw["assert_fingerprint"] = pin
+    return client
 
 
 def _classify(exc: Exception) -> tuple[str, str, str]:
     if isinstance(exc, AuthenticationError) or (isinstance(exc, WinRMTransportError) and exc.code == 401):
         return "AUTH_FAILED", "AUTH_OK", "Authentication failed"
     if isinstance(exc, requests.exceptions.SSLError):
+        if "Fingerprints did not match" in str(exc):
+            return "CERT_CHANGED", "TLS_VALIDATED", "Server certificate does not match the pinned certificate"
         return "TLS_INVALID", "TLS_VALIDATED", f"TLS error: {exc}"
     if isinstance(exc, (requests.exceptions.ConnectTimeout, requests.exceptions.ReadTimeout)):
         return "TIMEOUT", "SESSION_CREATED", f"WinRM timed out: {exc}"
@@ -226,11 +259,11 @@ def _classify(exc: Exception) -> tuple[str, str, str]:
 
 
 async def run(gate: NetworkGate, ip: str, port: int, cred: Credential, name: str, timeout_sec: float,
-              params: dict | None = None, deploy: bool = False) -> WinRmReply:
+              params: dict | None = None, deploy: bool = False, pin: str | None = None) -> WinRmReply:
     script = render_deploy(name, params or {}) if deploy else render(name, params)
     async with gate.permit(ip, "WINRM_DEPLOY" if deploy else "WINRM_PS"):
         try:
-            client = _client(ip, port, cred, timeout_sec)
+            client = _client(ip, port, cred, timeout_sec, pin)
             output, streams, had_errors = await asyncio.wait_for(
                 asyncio.to_thread(client.execute_ps, script), timeout_sec * 6)
         except asyncio.TimeoutError:
@@ -244,9 +277,15 @@ async def run(gate: NetworkGate, ip: str, port: int, cred: Credential, name: str
 
 
 async def open_session(gate: NetworkGate, ip: str, port: int, cred: Credential, timeout_sec: float,
-                       emit) -> WinRmReply:
-    """Runs the stages and reports each through ``emit(name, status, detail)`` (status as in WinRmReply)."""
-    tls = port != 5985 and not cred.params.get("http")
+                       emit, pin: str | None = None, require_pin: bool = False) -> WinRmReply:
+    """Runs the stages and reports each through ``emit(name, status, detail)`` (status as in WinRmReply). ``pin``:
+    the certificate fingerprint recorded earlier (trust on first use when None, unless ``require_pin``)."""
+    tls = uses_tls(port, cred)
+    if tls and require_pin and not pin:
+        detail = ("No pinned WinRM certificate for this host: run an agentless probe first, so its certificate is "
+                  "recorded")
+        await emit("TLS_VALIDATED", "NO_CERT_PIN", detail)
+        return WinRmReply("NO_CERT_PIN", "TLS_VALIDATED", detail=detail)
     await emit("CONNECTING", "OK", f"Connecting to {ip}:{port} ({'HTTPS' if tls else 'HTTP + message encryption'})")
     state = await tcp.connect(gate, ip, port, timeout_sec)
     if state.state != "OPEN":
@@ -256,35 +295,39 @@ async def open_session(gate: NetworkGate, ip: str, port: int, cred: Credential, 
         await emit("CONNECTING", status, detail)
         return WinRmReply(status, "CONNECTING", detail=detail)
     await emit("TCP_OK", "OK", f"TCP connection established to {ip}:{port}")
+    fingerprint = ""
     if tls:
-        ok, detail = await check_tls(gate, ip, port, cred, timeout_sec)
-        await emit("TLS_VALIDATED", "OK" if ok else "TLS_INVALID", detail)
-        if not ok:
-            return WinRmReply("TLS_INVALID", "TLS_VALIDATED", detail=detail)
-    reply = await run(gate, ip, port, cred, "ps_version", timeout_sec)
+        status, detail, fingerprint = await check_tls(gate, ip, port, cred, timeout_sec, pin)
+        await emit("TLS_VALIDATED", status, detail)
+        if status != "OK":
+            return WinRmReply(status, "TLS_VALIDATED", detail=detail,
+                              cert_sha256=fingerprint if status == "CERT_CHANGED" else "")
+    # From here on every connection must present the certificate just checked (or the pinned one).
+    reply = await run(gate, ip, port, cred, "ps_version", timeout_sec, pin=pin or fingerprint or None)
+    reply.cert_sha256 = fingerprint
     if reply.status != "OK":
-        await emit(reply.stage if reply.stage in ("AUTH_OK", "SESSION_CREATED") else "AUTH_OK", reply.status,
-                   reply.detail)
+        await emit(reply.stage if reply.stage in ("AUTH_OK", "SESSION_CREATED") or reply.status == "CERT_CHANGED"
+                   else "AUTH_OK", reply.status, reply.detail)
         return reply
     version = reply.output.strip()
     await emit("AUTH_OK", "OK", f"Authenticated as {cred.username}")
     if not version.isdigit() or int(version) < 3:
         detail = f"PowerShell {version or '?'} on target: PowerShell 3.0 or later required for agentless inventory"
         await emit("SESSION_CREATED", "ERROR", detail)
-        return WinRmReply("ERROR", "SESSION_CREATED", output=version, detail=detail)
+        return WinRmReply("ERROR", "SESSION_CREATED", output=version, detail=detail, cert_sha256=fingerprint)
     await emit("SESSION_CREATED", "OK", f"PowerShell {version} remoting session works")
-    return WinRmReply("OK", output=version)
+    return WinRmReply("OK", output=version, cert_sha256=fingerprint)
 
 
 async def copy_file(gate: NetworkGate, ip: str, port: int, cred: Credential, local: str, remote: str,
-                    timeout_sec: float) -> WinRmReply:
+                    timeout_sec: float, pin: str | None = None) -> WinRmReply:
     """Copy one file to the host over the WinRM session (PSRP, base64 chunks). Used for agent binaries only;
     ``remote`` must be inside the staging folder."""
     if not DEPLOY_PARAMS["path"].match(remote):
         raise ValueError(f"refusing to copy outside the staging folder: {remote}")
     async with gate.permit(ip, "WINRM_COPY"):
         try:
-            client = _client(ip, port, cred, timeout_sec)
+            client = _client(ip, port, cred, timeout_sec, pin)
             await asyncio.wait_for(asyncio.to_thread(client.copy, local, remote), 900)
         except asyncio.TimeoutError:
             return WinRmReply("TIMEOUT", "SESSION_CREATED", detail="File copy did not finish within 15 minutes")
