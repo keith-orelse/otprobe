@@ -173,6 +173,17 @@ function isoLocal(d: Date): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+const GOARCH: Record<string, string> = { x86_64: "amd64", amd64: "amd64", aarch64: "arm64", arm64: "arm64",
+  armv7l: "arm", armv6l: "arm", i686: "386", i386: "386" };
+
+function fieldValue(asset: Asset, path: string): unknown {
+  for (const fields of Object.values(asset.groups)) {
+    const f = fields.find((x) => x.path === path);
+    if (f) return f.value;
+  }
+  return undefined;
+}
+
 function DeployRequest({ asset, onClose }: { asset: Asset; onClose: () => void }) {
   const nav = useNavigate();
   const packages = useQuery({ queryKey: ["packages"], queryFn: () => apiGet<Package[]>("/packages") });
@@ -182,14 +193,22 @@ function DeployRequest({ asset, onClose }: { asset: Asset; onClose: () => void }
   const [start, setStart] = useState(isoLocal(new Date()));
   const [end, setEnd] = useState(isoLocal(new Date(Date.now() + 2 * 3600_000)));
   const active = (packages.data ?? []).filter((p) => p.status === "ACTIVE");
-  // Preselect a build made for this asset's OS (modern x64 first), e.g. "Windows 10 Home" -> windows-amd64.
+  // Preselect a build made for this asset's OS and CPU (modern first): "Windows 10 Home" -> windows-amd64,
+  // "Raspbian" on aarch64 -> linux-arm64. The precheck refuses a build for the wrong CPU anyway.
   const os = asset.os ?? "";
+  const linux = fieldValue(asset, "os.family") === "linux";
+  const machine = String(fieldValue(asset, "hardware.arch") ?? "");
+  const cpu = GOARCH[machine] ?? "amd64";
+  const arm = machine.startsWith("armv6") ? "armv6" : "armv7";      // both are linux/arm: pick by build id
   const fits = active.filter((p) => p.supportedOs.some((s) => os.includes(s)));
-  const best = fits.find((p) => p.architecture.endsWith("amd64") && !p.id.includes("legacy")) ?? fits[0] ?? active[0];
+  const best = fits.find((p) => p.architecture.endsWith(`/${cpu}`) && !p.id.includes("legacy")
+    && (cpu !== "arm" || p.id.includes(arm)))
+    ?? fits.find((p) => p.architecture.endsWith(cpu)) ?? fits[0] ?? active[0];
+  const profile = linux ? "OT-LINUX-SSH-INSTALLER" : "OT-WINDOWS-INSTALLER";
   const selected = pkg || best?.id || "";
   const submit = useMutation({
     mutationFn: () => apiAction<Deployment>("/deployments", {
-      assetId: asset.id, packageId: selected, purpose,
+      assetId: asset.id, packageId: selected, purpose, credentialProfile: profile,
       maintenanceWindow: useWindow ? { start: new Date(start).toISOString(), end: new Date(end).toISOString() } : null,
     }),
     onSuccess: (d) => nav(`/deployments/${d.id}`),
@@ -204,7 +223,7 @@ function DeployRequest({ asset, onClose }: { asset: Asset; onClose: () => void }
                 {p.name} {p.version} ({p.architecture}) · {p.status}</option>))}
           </select>
         </label>
-        <label>Credential profile<input value="OT-WINDOWS-INSTALLER" disabled /></label>
+        <label>Credential profile<input value={profile} disabled /></label>
         <label className="wide">Purpose<input value={purpose} onChange={(e) => setPurpose(e.target.value)} /></label>
         <label className="check"><input type="checkbox" checked={useWindow} disabled={asset.maintenanceWindowRequired}
           onChange={(e) => setUseWindow(e.target.checked)} />Maintenance window
@@ -246,7 +265,7 @@ function ComplianceStrip({ asset }: { asset: Asset }) {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["asset", asset.id] }),
   });
   return (
-    <Panel title="Compliance · Windows Engineering Baseline" actions={<>
+    <Panel title="Compliance" actions={<>
 
       {c.lastRunId && <Link to={`/assessments/${c.lastRunId}`}>last run →</Link>}</>}>
       <div className="compliance">

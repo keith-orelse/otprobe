@@ -6,14 +6,15 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app import schemas
-from app.adapters.base import Protocol, RemoteOperation, Target
+from app.adapters.base import RemoteOperation, Target
 from app.context import AppContext
 from app.core import audit, events
 from app.core.clock import utcnow
 from app.core.correlation import get_correlation_id
 from app.core.errors import ProblemError, not_found
 from app.core.principal import CurrentUser
-from app.engines.remote import profile_port
+from app.engines.inventory import effective_fields
+from app.engines.remote import installer_profile, platform_for, profile_port
 from app.engines.removal.engine import RemovalEngine
 from app.models import Agent, Approval, Asset, Removal, WorkflowStep
 from app.services import approvals, safety
@@ -55,7 +56,7 @@ def remove_action(session: Session, agent: Agent | None) -> schemas.ActionState:
 def restart_action(agent: Agent | None) -> schemas.ActionState:
     if agent is None or agent.status not in ("ONLINE", "STALE", "OFFLINE"):
         return schemas.ActionState(enabled=False, reason="No installed agent to restart")
-    return schemas.ActionState(enabled=True, reason="Restart the OTProbeAgent service via WinRM")
+    return schemas.ActionState(enabled=True, reason="Restart the agent service on the host (WinRM or SSH)")
 
 
 def to_schema(session: Session, rem: Removal, user: CurrentUser, detail: bool = True) -> schemas.Removal:
@@ -136,17 +137,20 @@ async def restart_agent(ctx: AppContext, agent_id: str, user: CurrentUser) -> di
             raise ProblemError(409, "restart-not-possible", "Restart not possible", act.reason)
         ip = s.get(Asset, agent.asset_id).ip
         safety.ensure_can_scan(ctx, s, [ip])
-    winrm = ctx.registry.get(Protocol.WINRM)
-    cred = await ctx.vault.resolve("OT-WINDOWS-INSTALLER", purpose=f"restart agent {agent_id}",
-                                   correlation_id=get_correlation_id())
-    res, session = await winrm.open_session(Target(ip, port=await profile_port(ctx, "OT-WINDOWS-INSTALLER"),
-                                                    credential=cred))
+        fields = {p: r.value for p, r in effective_fields(s, agent.asset_id).items()}
+        platform = platform_for(fields)
+        profile = installer_profile(s, agent, platform)
+    remote = ctx.registry.get(platform.protocol)
+    cred = await ctx.vault.resolve(profile, purpose=f"restart agent {agent_id}", correlation_id=get_correlation_id())
+    res, session = await remote.open_session(Target(ip, port=await profile_port(ctx, profile, platform.port),
+                                                    credential=cred, options=platform.options(fields)))
     if session is None:
-        raise ProblemError(502, "winrm-failed", "Could not reach the host over WinRM", res.error_detail)
+        raise ProblemError(502, f"{platform.access.lower()}-failed",
+                           f"Could not reach the host over {platform.label}", res.error_detail)
     try:
-        r = await winrm.execute(session, RemoteOperation.START_SERVICE, {"name": "OTProbeAgent"})
+        r = await remote.execute(session, RemoteOperation.START_SERVICE, {"name": platform.service})
     finally:
-        await winrm.close_session(session)
+        await remote.close_session(session)
     with ctx.db.session() as s:
         audit.record(s, user.actor, "AGENT_SERVICE_RESTARTED", "agent", agent_id,
                      {"result": "ok" if r.ok else r.error_detail})
@@ -154,4 +158,4 @@ async def restart_agent(ctx: AppContext, agent_id: str, user: CurrentUser) -> di
     if not r.ok:
         raise ProblemError(502, "restart-failed", "Service restart failed", r.error_detail)
     return {"agentId": agent_id, "service": "running",
-            "message": "OTProbeAgent restarted; the agent resumes heartbeats on its own"}
+            "message": f"{platform.service} restarted; the agent resumes heartbeats on its own"}

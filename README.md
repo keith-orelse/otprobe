@@ -3,7 +3,7 @@
 **OT asset discovery, agentless probing and deep agent probing on real networks.**
 
 OTProbe discovers devices on approved subnets, identifies them without changing anything (ICMP, ARP, TCP, SNMP,
-WinRM/WMI, SSH and read-only OT protocols), and, with approval, deploys a Go agent to Windows hosts for deep
+WinRM/WMI, SSH and read-only OT protocols), and, with approval, deploys a Go agent to Windows and Linux hosts for deep
 compliance assessments. Every packet goes through a network gate: nothing outside the approved scan scope is ever
 contacted, and **STOP ALL** halts everything at once.
 
@@ -59,13 +59,12 @@ To deploy the Go agent, the API must run over HTTPS so agents can pin its CA. St
 | Safety | Scan scope (include/exclude), IT and OT-sensitive profiles, safe mode, rate limits, kill switch, all audited |
 | Discovery | ICMP sweep, kernel neighbour table (proxy-ARP aware), TCP connect, SNMP v2c/v3. Live progress, rogue detection |
 | Agentless probing | WinRM/WMI and SSH with read-only command allow-lists; Modbus, S7, EtherNet/IP, BACnet, OPC UA and HTTP identification. Classification with evidence |
-| Deployment | Request → approval (no self-approval) → 9-check precheck → WinRM install → enrollment over pinned TLS. Rollback if anything fails after install |
+| Deployment | Request → approval (no self-approval) → 9-check precheck → install over WinRM (Windows) or SSH (Linux) → enrollment over pinned TLS. Rollback if anything fails after install |
 | Go agent | Windows (modern and legacy), Linux, macOS; signed releases; outbound HTTPS only; fixed compiled-in checks |
 | Compliance | Rules as YAML: Windows and Linux baselines, scoring with UNKNOWN excluded, findings lifecycle, drift, agentless vs deep comparison |
 | Platform | REST `/api/v1`, Swagger at `/docs`, RFC 7807 errors, idempotency keys, SSE, hash-chained audit log, Alembic migrations |
 
-Not built yet: Linux deployment over SSH, manual one-line install, WinRM certificate pinning, user management, and
-the bundled MQTT broker (see the phase table in [docs/LIVE_ARCHITECTURE.md](docs/LIVE_ARCHITECTURE.md)).
+Not built yet: manual one-line install, WinRM certificate pinning, user management, and the bundled MQTT broker (see the phase table in [docs/LIVE_ARCHITECTURE.md](docs/LIVE_ARCHITECTURE.md)).
 
 ## Tests
 
@@ -80,7 +79,8 @@ cd ../agent-go && go test ./...     # Go agent
 The acceptance tests run the workflows against the simulated plant in `backend/tests/sim`, which the tests plug in
 with `create_app(settings, environment=SimEnvironment())`. The live tests use real protocol servers on 127.0.0.1
 and the real Go agent. Manual guides for real hardware: [TESTING_L3.md](docs/TESTING_L3.md),
-[TESTING_L4.md](docs/TESTING_L4.md), [TESTING_L5.md](docs/TESTING_L5.md).
+[TESTING_L4.md](docs/TESTING_L4.md), [TESTING_L5.md](docs/TESTING_L5.md),
+[TESTING_L6_LINUX.md](docs/TESTING_L6_LINUX.md).
 
 ## Documentation
 

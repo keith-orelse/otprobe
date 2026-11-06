@@ -16,6 +16,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, AsyncIterator, Awaitable, Callable, Mapping, Optional, Sequence
 
+from app.core.clock import utcnow
+
 
 class Protocol(str, enum.Enum):
     ICMP = "ICMP"
@@ -200,9 +202,22 @@ class WmiAdapter(ProtocolAdapter):
 
 
 class SshAdapter(ProtocolAdapter):
-    """Stub in the POC: identity-only (hostname, os-release, kernel, uptime)."""
+    """Read-only probing of Linux/Unix hosts. Implementations that can also deploy the agent (the real one) override
+    the session methods; the defaults answer NOT_SUPPORTED."""
 
     protocol = Protocol.SSH
+
+    async def open_session(self, target: Target, on_stage: Optional[StageCallback] = None
+                           ) -> tuple[AdapterResult, Optional[RemoteSession]]:
+        return AdapterResult(Protocol.SSH, target.address, ResultStatus.NOT_SUPPORTED, collected_at=utcnow(),
+                             error_code="NOT_AVAILABLE", error_detail="This SSH adapter cannot deploy agents"), None
+
+    async def execute(self, session: RemoteSession, op: RemoteOperation, params: Mapping[str, Any]) -> AdapterResult:
+        return AdapterResult(Protocol.SSH, session.target, ResultStatus.NOT_SUPPORTED, collected_at=utcnow(),
+                             error_code="NOT_AVAILABLE", error_detail="This SSH adapter cannot deploy agents")
+
+    async def close_session(self, session: RemoteSession) -> None:
+        return None
 
 
 class OtPlugin(abc.ABC):
@@ -221,8 +236,8 @@ class OtPlugin(abc.ABC):
 
 
 class RemoteOperation(str, enum.Enum):
-    """Closed set of remote operations the deployment/removal engines may request.
-    A real WinRM adapter maps each to a vetted PowerShell script; no free-form commands."""
+    """Closed set of remote operations the deployment/removal engines may request. The real WinRM adapter maps each
+    to a vetted PowerShell script, the real SSH adapter to a vetted shell command; no free-form commands."""
 
     QUERY_DISK_FREE = "QUERY_DISK_FREE"
     QUERY_HOSTNAME = "QUERY_HOSTNAME"
@@ -230,6 +245,8 @@ class RemoteOperation(str, enum.Enum):
     QUERY_REBOOT_PENDING = "QUERY_REBOOT_PENDING"
     QUERY_AGENT_INSTALLED = "QUERY_AGENT_INSTALLED"
     QUERY_SERVER_CONNECTIVITY = "QUERY_SERVER_CONNECTIVITY"  # Test-NetConnection <server> -Port 443
+    QUERY_ARCH = "QUERY_ARCH"                # Linux: uname -m, to pick the matching agent build
+    QUERY_ROOT_ACCESS = "QUERY_ROOT_ACCESS"  # Linux: can the installer account act as root (directly or via sudo)?
     VERIFY_FILE_HASH = "VERIFY_FILE_HASH"
     INSTALL_AGENT = "INSTALL_AGENT"
     WRITE_ENROLLMENT_BUNDLE = "WRITE_ENROLLMENT_BUNDLE"
@@ -244,6 +261,7 @@ class RemoteSession:
     session_id: str
     target: str
     stages: list[Stage]
+    protocol: Protocol = Protocol.WINRM      # which adapter owns it (WINRM or SSH)
 
 
 class WinRmAdapter(ProtocolAdapter):

@@ -6,21 +6,24 @@ eligibility:
   - when: { classification.type: "in ['Sensor', 'Industrial Switch', 'BACnet Controller', 'Modbus Device']" }
     result: NOT_ELIGIBLE
     reason: Embedded or network device; agentless monitoring only.
-  - when: { os.family: "== 'linux'" }
-    result: NOT_SUPPORTED
-    reason: Linux agent builds exist, but deployment over SSH is not built yet (phase L6); agentless only (SSH/SNMP).
   - when: { os.family: "== 'macos'" }
     result: NOT_SUPPORTED
     reason: macOS agent is not part of the first agent release; agentless only (SSH).
-  - when: { os.family: "== 'windows'", asset.criticality: "== 'CRITICAL'" }
+  - when: { os.family: "in ['windows', 'linux']", asset.criticality: "== 'CRITICAL'" }
     result: REVIEW_REQUIRED
     reason: Critical asset; deployment requires approver review and a maintenance window.
   - when: { os.family: "== 'windows'", services.winrm.available: "== true" }
     result: ELIGIBLE
     reason: Windows host with WinRM available.
+  - when: { os.family: "== 'linux'", services.ssh.available: "== true" }
+    result: ELIGIBLE
+    reason: Linux host with SSH available.
   - when: { os.family: "== 'windows'" }
     result: NOT_ELIGIBLE
     reason: WinRM not available; agent cannot be deployed remotely.
+  - when: { os.family: "== 'linux'" }
+    result: NOT_ELIGIBLE
+    reason: SSH not available; agent cannot be deployed remotely.
   - when: {}
     result: UNKNOWN
     reason: Run an agentless probe to determine eligibility.

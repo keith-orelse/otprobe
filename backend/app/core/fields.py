@@ -11,7 +11,7 @@ GROUPS: dict[str, list[str]] = {
                 "network.open_ports", "network.arp_via", "ot.protocols", "ot.device_type", "opcua.security_policies",
                 "mqtt.client_id", "mqtt.topics", "mqtt.broker"],
     "Hardware": ["hardware.manufacturer", "hardware.cpu", "hardware.ram_gb", "hardware.disk",
-                 "hardware.uptime_sec", "snmp.uptime_sec"],
+                 "hardware.arch", "hardware.uptime_sec", "snmp.uptime_sec"],
     "OS": ["os.family", "os.name", "os.product", "os.version", "os.build", "os.kernel", "firmware.version",
            "plc.mode", "plc.cpu"],
     "Software": ["software.installed"],

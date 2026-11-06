@@ -14,6 +14,8 @@ from app.core.correlation import get_correlation_id
 from app.core.errors import ProblemError, not_found
 from app.core.principal import CurrentUser
 from app.engines.deployment.engine import DeploymentEngine
+from app.engines.inventory import effective_fields
+from app.engines.remote import platform_for
 from app.models import Agent, Approval, Asset, Deployment, Package, PrecheckResult, WorkflowStep
 from app.services import approvals, safety
 from app.services.common import paginate
@@ -114,7 +116,9 @@ def create(ctx: AppContext, session: Session, req: schemas.DeploymentCreate, use
         raise ProblemError(422, "invalid-maintenance-window", "Maintenance window end must be after start")
     if window and window.end <= utcnow():
         raise ProblemError(422, "invalid-maintenance-window", "Maintenance window is in the past")
-    dep = Deployment(asset_id=asset.id, package_id=package.id, credential_profile=req.credential_profile,
+    profile = req.credential_profile or platform_for(
+        {p: r.value for p, r in effective_fields(session, asset.id).items()}).installer_profile
+    dep = Deployment(asset_id=asset.id, package_id=package.id, credential_profile=profile,
                      purpose=req.purpose, requested_by=user.username, correlation_id=get_correlation_id(),
                      retry_of_id=retry_of)
     DEPLOYMENT.create(session, dep, user.actor, {"assetId": asset.id, "ip": asset.ip, "package": package.id,

@@ -426,7 +426,8 @@ class MaintenanceWindow(Camel):
 class DeploymentCreate(Camel):
     asset_id: str
     package_id: str = Field(examples=["pkg-probe-agent-1.1.0"])
-    credential_profile: str = "OT-WINDOWS-INSTALLER"
+    credential_profile: str | None = Field(None, max_length=64, description="Vault profile for the install. Default: "
+                                           "OT-WINDOWS-INSTALLER (Windows) or OT-LINUX-SSH-INSTALLER (Linux)")
     purpose: str = Field(min_length=3, max_length=500, examples=["Deep compliance monitoring"])
     maintenance_window: MaintenanceWindow | None = None
 

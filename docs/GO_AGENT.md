@@ -176,6 +176,14 @@ It contains **no** long-lived secrets.
 
 ### `install.sh` (POSIX `sh`, so it works on busybox and Alpine)
 
+> **As built in L6 (SSH deployment):** there is no separate `install.sh` file. The server runs the same steps as a
+> fixed set of short POSIX `sh` commands over SSH (`app/adapters/real/net/ssh.py`, `deploy_command`), one per
+> `RemoteOperation`, each with validated values. Root is used directly when the login is root, otherwise through
+> `sudo -S` (password on stdin) or `sudo -n` (key login, NOPASSWD). The binary is uploaded by SFTP into a new private
+> folder (`mktemp -d /var/tmp/otprobe.XXXXXXXXXX`), copied into `/opt/otprobe/` as root, and its SHA-256 is checked
+> on that root-owned copy before it is installed. Failures map to `HASH_MISMATCH`, `INSTALL_FAILED`,
+> `SERVICE_START_FAILED` and `NO_ROOT`. The step list below remains the plan for the manual one-liner.
+
 ```text
 1. Check: root (or sudo); uname -m matches build arch; kernel version; free space   → exit 40/41
 2. Get binary:   PULL — curl or wget with --cacert (pinned CA written by the script)
@@ -285,6 +293,8 @@ The rule engine, scoring formula and drift logic do not change ([RULES.md](RULES
   downloads) is used only by the manual one-liner, which is not built yet (moved to L6).
 - **Credential at rest (Windows)**: `C:\ProgramData\OTProbe\agent.json` is restricted to SYSTEM and Administrators
   by ACL. DPAPI encryption of the credential, as planned in §4, is not done yet.
-- **Linux deployment over SSH**: the Linux builds and collectors exist and are unit-tested, but OTProbe does not yet
-  deploy them over SSH (no Linux test host); moved to L6 together with `install.sh`.
+- **Linux deployment over SSH** (built in L6): precheck (including root access and the CPU type), install, restart
+  and removal over SSH, only to hosts whose SSH host key an agentless probe has pinned. Tested on a stand-in Linux
+  host (a real SSH server and shell in a sandbox) with the real Go agent enrolling; the manual test on a real Linux
+  machine is [TESTING_L6_LINUX.md](TESTING_L6_LINUX.md). Hosts with SFTP turned off cannot receive the binary yet.
 - **macOS**: a small collector set used for development; no macOS policy and no service installation.

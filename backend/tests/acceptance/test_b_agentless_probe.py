@@ -65,7 +65,7 @@ async def test_unreachable_device_probe_fails(discovered):
 @pytest.mark.parametrize("ip,expected_type,eligibility", [
     ("192.168.20.14", "Windows Engineering Workstation", "ELIGIBLE"),
     ("192.168.20.139", "SCADA Server", "REVIEW_REQUIRED"),
-    ("192.168.20.149", "Historian (Linux Server)", "NOT_SUPPORTED"),
+    ("192.168.20.149", "Historian (Linux Server)", "ELIGIBLE"),     # SSH available: Linux deploy (L6)
     ("192.168.20.1", "Industrial Switch", "NOT_ELIGIBLE"),
     ("192.168.10.20", "Sensor", "NOT_ELIGIBLE"),
 ])

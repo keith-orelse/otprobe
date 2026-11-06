@@ -10,9 +10,6 @@ from typing import Any, AsyncIterator, Mapping
 from app.adapters.base import (
     AdapterResult,
     DiscoveredHost,
-    PackageRef,
-    PackageTransfer,
-    ProgressCallback,
     Protocol,
     Query,
     RemoteOperation,
@@ -21,7 +18,6 @@ from app.adapters.base import (
     Stage,
     StageCallback,
     Target,
-    TransferResult,
     WinRmAdapter,
     WmiAdapter,
 )
@@ -333,35 +329,3 @@ class RealWmiAdapter(RealAdapterMixin, WmiAdapter):
 
     async def get_device_info(self, target: Target) -> AdapterResult:
         return await self.probe(target, Query(["os", "hardware"]))
-
-
-class RealPackageTransfer(PackageTransfer):
-    """Copies a verified agent build into the host's staging folder over the open WinRM session (PUSH mode).
-    ``resolve`` maps a package id to the local file of its verified build (wired in app.main)."""
-
-    def __init__(self, winrm, resolve) -> None:
-        """``winrm``: a callable returning the WinRM adapter in use (looked up per transfer), or the adapter."""
-        self._winrm, self.resolve = winrm, resolve
-
-    @property
-    def winrm(self):
-        return self._winrm() if callable(self._winrm) else self._winrm
-
-    async def transfer(self, session: RemoteSession, package: PackageRef,
-                       on_progress: ProgressCallback | None = None) -> TransferResult:
-        local = self.resolve(package.package_id)
-        if not local:
-            return TransferResult(ResultStatus.ERROR, error_code="BUILD_NOT_FOUND",
-                                  error_detail=f"No verified agent build for package {package.package_id}")
-        remote = f"{winrm.STAGING}\\{local.rsplit('/', 1)[-1]}".replace("\\\\", "\\")
-        if on_progress is not None:
-            await on_progress(0.0)
-        try:
-            reply = await self.winrm.copy(session, local, remote)
-        except GateBlocked as exc:
-            return TransferResult(ResultStatus.BLOCKED, error_code="BLOCKED", error_detail=str(exc))
-        if reply.status != "OK":
-            return TransferResult(STATUS[reply.status], error_code=f"COPY_{reply.status}", error_detail=reply.detail)
-        if on_progress is not None:
-            await on_progress(1.0)
-        return TransferResult(ResultStatus.OK, remote_path=reply.output, bytes_transferred=package.size_bytes)

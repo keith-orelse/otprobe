@@ -1,5 +1,6 @@
-"""Precheck and agent deployment (docs/STATE_MACHINES.md §2). The engine reaches the host only through the
-WinRM adapter and the PackageTransfer port; the agent then runs on its own and enrolls outbound."""
+"""Precheck and agent deployment (docs/STATE_MACHINES.md §2). The engine reaches the host only through the WinRM
+adapter (Windows) or the SSH adapter (Linux) and the PackageTransfer port; the agent then runs on its own and enrolls
+outbound."""
 
 from __future__ import annotations
 
@@ -19,23 +20,29 @@ from app.core.clock import utcnow
 from app.core.correlation import get_correlation_id
 from app.core.security import opaque_token
 from app.engines.inventory import effective_fields
-from app.engines.protocol_events import winrm_event
-from app.engines.remote import agent_profile, profile_port, server_endpoint, server_url
+from app.engines.remote import Platform, agent_profile, platform_for, profile_port, server_endpoint, server_url
 from app.models import Agent, Asset, Deployment, EnrollmentToken, Package, PrecheckResult, WorkflowStep
 from app.workflow.machine import AGENT, DEPLOYMENT
 from app.workflow.steps import StepTracker
 
 log = logging.getLogger("otprobe.deployment")
 ACTOR = system("deployment-engine")
-PRECHECKS = ["REACHABLE", "HOSTNAME_VERIFIED", "WINRM_AVAILABLE", "AUTHENTICATION", "PACKAGE_COMPATIBLE",
-             "DISK_SPACE", "EXISTING_AGENT", "SERVER_CONNECTIVITY", "REBOOT_REQUIRED"]
-DEPLOY_STEPS = ["CONNECT", "WINRM_SESSION", "RETRIEVE_CREDENTIAL", "TRANSFER_PACKAGE", "VERIFY_HASH", "INSTALL",
-                "SERVICE_CREATED", "START_SERVICE", "AWAIT_ENROLLMENT"]
 MIN_FREE_GB = 2
-NEEDS_SESSION = "Requires an authenticated WinRM session"
 
 
-def package_compatible(package: Package, os_product: str | None) -> tuple[bool, str]:
+def prechecks(platform: Platform) -> list[str]:
+    return ["REACHABLE", "HOSTNAME_VERIFIED", f"{platform.access}_AVAILABLE", "AUTHENTICATION", "PACKAGE_COMPATIBLE",
+            "DISK_SPACE", "EXISTING_AGENT", "SERVER_CONNECTIVITY", "REBOOT_REQUIRED"]
+
+
+def deploy_steps(platform: Platform) -> list[str]:
+    return ["CONNECT", f"{platform.access}_SESSION", "RETRIEVE_CREDENTIAL", "TRANSFER_PACKAGE", "VERIFY_HASH",
+            "INSTALL", "SERVICE_CREATED", "START_SERVICE", "AWAIT_ENROLLMENT"]
+
+
+def package_compatible(package: Package, os_product: str | None, platform: Platform | None = None,
+                       goarch: str | None = None, machine: str | None = None) -> tuple[bool, str]:
+    """OS product (prefix match), and for Go agent builds ("<os>/<arch>") the OS family and, when known, the CPU."""
     if package.status != "ACTIVE":
         return False, f"Package {package.version} is {package.status}"
     if not os_product:
@@ -43,7 +50,15 @@ def package_compatible(package: Package, os_product: str | None) -> tuple[bool, 
     match = next((s for s in package.supported_os if os_product.startswith(s)), None)
     if match is None:
         return False, f"{os_product} not in supported OS list ({', '.join(package.supported_os)})"
-    return True, f"{package.name} {package.version} ({package.architecture}) supports {os_product}"
+    build_os, _, build_arch = package.architecture.partition("/")
+    if platform is not None and build_arch and build_os != platform.os:
+        return False, f"{package.name} is built for {build_os}, the host runs {platform.os}"
+    if goarch and build_arch and build_arch != goarch:
+        return False, f"{package.name} is built for {build_arch}, the host's CPU is {goarch}: choose the {goarch} build"
+    if machine and machine.startswith("armv6") and "armv7" in package.id:      # Pi Zero / Pi 1: ARMv7 code crashes
+        return False, f"{package.name} needs ARMv7, the host's CPU is {machine}: choose the linux-armv6 build"
+    cpu = f", CPU {goarch}" if goarch else ""
+    return True, f"{package.name} {package.version} ({package.architecture}) supports {os_product}{cpu}"
 
 
 def complete_enrollment(s: Session, dep: Deployment, agent: Agent, actor: Actor) -> bool:
@@ -69,6 +84,12 @@ class DeploymentEngine:
         self.ctx = ctx
         self.agent_profile = "windows-workstation"
 
+    def _platform(self, dep_id: str) -> tuple[Platform, dict]:
+        with self.ctx.db.session() as s:
+            dep = s.get(Deployment, dep_id)
+            fields = {p: r.value for p, r in effective_fields(s, dep.asset_id).items()}
+        return platform_for(fields), fields
+
     # ------------------------------------------------------------------ precheck
     async def precheck(self, dep_id: str) -> None:
         try:
@@ -90,12 +111,15 @@ class DeploymentEngine:
             fields = {p: r.value for p, r in effective_fields(s, asset.id).items()}
             run_no, ip, hostname, profile = dep.precheck_run_no, asset.ip, asset.hostname, dep.credential_profile
             s.expunge(package)
+        platform = platform_for(fields)
+        checks = prechecks(platform)
+        access, needs_session = checks[2], f"Requires an authenticated {platform.label} session"
         results: dict[str, tuple[str, str]] = {}
 
         def record(check: str, status: str, detail: str) -> None:
             results[check] = (status, detail)
             with ctx.db.session() as s:
-                s.add(PrecheckResult(deployment_id=dep_id, run_no=run_no, seq=PRECHECKS.index(check) + 1,
+                s.add(PrecheckResult(deployment_id=dep_id, run_no=run_no, seq=checks.index(check) + 1,
                                      check=check, status=status, detail=detail))
                 events.stage(s, "deployment.precheck", "deployment", dep_id,
                              {"runNo": run_no, "check": check, "status": status, "detail": detail})
@@ -108,62 +132,75 @@ class DeploymentEngine:
         else:
             record("REACHABLE", "FAIL", "Device not reachable by ARP or ICMP")
 
-        winrm = reg.get(Protocol.WINRM)
-        port = await profile_port(ctx, profile)
-        hc = await winrm.health_check(Target(ip, port=port))
-        record("WINRM_AVAILABLE", "PASS" if hc.ok else "FAIL",
-               f"WinRM listener on {ip}:{port}" if hc.ok else (hc.error_detail or hc.status.value))
+        remote = reg.get(platform.protocol)
+        port = await profile_port(ctx, profile, platform.port)
+        hc = await remote.health_check(Target(ip, port=port))
+        record(access, "PASS" if hc.ok else "FAIL",
+               f"{platform.label} listener on {ip}:{port}" if hc.ok else (hc.error_detail or hc.status.value))
         if not hc.ok:
-            self._audit(dep_id, winrm_event(hc.status), hc.error_detail)
+            self._audit(dep_id, platform.event(hc.status), hc.error_detail)
 
         session: RemoteSession | None = None
         if hc.ok:
             cred = await ctx.vault.resolve(profile, purpose=f"precheck {dep_id}", correlation_id=get_correlation_id())
-            res, session = await winrm.open_session(Target(ip, port=port, credential=cred))
-            record("AUTHENTICATION", "PASS" if session else "FAIL",
-                   f"Authenticated as {cred.username} (profile {profile})" if session else res.error_detail or "")
+            res, session = await remote.open_session(Target(ip, port=port, credential=cred,
+                                                            options=platform.options(fields)))
+            detail = f"Authenticated as {cred.username} (profile {profile})" if session else res.error_detail or ""
+            ok = session is not None
+            if session is not None and platform.protocol == Protocol.SSH:
+                r = await remote.execute(session, RemoteOperation.QUERY_ROOT_ACCESS, {})
+                ok = r.ok
+                detail += f"; root access via {r.raw.get('via')}" if r.ok else \
+                    f", but cannot act as root: {r.error_detail}. Use root, or an account with sudo"
+            record("AUTHENTICATION", "PASS" if ok else "FAIL", detail)
             if session is None:
-                self._audit(dep_id, winrm_event(res.status), res.error_detail)
+                self._audit(dep_id, platform.event(res.status), res.error_detail)
         else:
-            record("AUTHENTICATION", "FAIL", "WinRM not available")
+            record("AUTHENTICATION", "FAIL", f"{platform.label} not available")
 
-        ok, detail = package_compatible(package, fields.get("os.product"))
+        goarch = machine = None
+        if session is not None and platform.protocol == Protocol.SSH:
+            arch = await remote.execute(session, RemoteOperation.QUERY_ARCH, {})
+            goarch, machine = arch.raw.get("goarch"), arch.raw.get("arch")
+        ok, detail = package_compatible(package, fields.get("os.product"), platform, goarch, machine)
         record("PACKAGE_COMPATIBLE", "PASS" if ok else "FAIL", detail)
 
         if session is None:
             for check in ("HOSTNAME_VERIFIED", "DISK_SPACE", "EXISTING_AGENT", "SERVER_CONNECTIVITY",
                           "REBOOT_REQUIRED"):
-                record(check, "FAIL", NEEDS_SESSION)
+                record(check, "FAIL", needs_session)
         else:
             try:
-                r = await winrm.execute(session, RemoteOperation.QUERY_HOSTNAME, {})
-                remote = r.data.get("identity.hostname")
-                mismatch = "" if remote == hostname else f" does not match inventory {hostname}"
-                record("HOSTNAME_VERIFIED", "FAIL" if mismatch else "PASS", f"Remote hostname {remote}{mismatch}")
-                r = await winrm.execute(session, RemoteOperation.QUERY_DISK_FREE, {})
-                sysdrive = next((d for d in r.data.get("hardware.disk", []) if d["drive"] == "C:"), None)
+                r = await remote.execute(session, RemoteOperation.QUERY_HOSTNAME, {})
+                got = r.data.get("identity.hostname")
+                mismatch = "" if got == hostname else f" does not match inventory {hostname}"
+                record("HOSTNAME_VERIFIED", "FAIL" if mismatch else "PASS", f"Remote hostname {got}{mismatch}")
+                r = await remote.execute(session, RemoteOperation.QUERY_DISK_FREE, {})
+                disks = r.data.get("hardware.disk", [])
+                sysdrive = next((d for d in disks if d["drive"] == "C:"), None) if platform.os == "windows" \
+                    else next(iter(disks), None)
                 free = sysdrive["free_gb"] if sysdrive else 0
                 record("DISK_SPACE", "PASS" if free >= MIN_FREE_GB else "FAIL",
-                       f"{free} GB free on C: (required {MIN_FREE_GB} GB)")
-                r = await winrm.execute(session, RemoteOperation.QUERY_AGENT_INSTALLED, {})
+                       f"{free} GB free on {sysdrive['drive'] if sysdrive else 'C:'} (required {MIN_FREE_GB} GB)")
+                r = await remote.execute(session, RemoteOperation.QUERY_AGENT_INSTALLED, {})
                 installed = r.raw.get("installed")
                 record("EXISTING_AGENT", "FAIL" if installed else "PASS",
                        ("An agent is already installed" + (f" (version {r.raw['version']})" if r.raw.get("version")
                                                             else "") + ": remove it first") if installed
                        else "No agent installed")
                 host, server_port = server_endpoint(ctx)
-                r = await winrm.execute(session, RemoteOperation.QUERY_SERVER_CONNECTIVITY,
-                                        {"server": host, "port": server_port})
+                r = await remote.execute(session, RemoteOperation.QUERY_SERVER_CONNECTIVITY,
+                                         {"server": host, "port": server_port})
                 record("SERVER_CONNECTIVITY", "PASS" if r.ok else "FAIL",
                        f"Host can reach the OTProbe server {host}:{server_port} (outbound only)" if r.ok
                        else r.error_detail or "")
-                r = await winrm.execute(session, RemoteOperation.QUERY_REBOOT_PENDING, {})
+                r = await remote.execute(session, RemoteOperation.QUERY_REBOOT_PENDING, {})
                 pending = r.raw.get("reboot_pending")
                 record("REBOOT_REQUIRED", "WARN" if pending else "PASS",
                        "A reboot is pending; schedule within the maintenance window" if pending
                        else "No reboot pending; agent install does not require a reboot")
             finally:
-                await winrm.close_session(session)
+                await remote.close_session(session)
 
         failed = [c for c, (st, _) in results.items() if st == "FAIL"]
         with ctx.db.session() as s:
@@ -182,9 +219,10 @@ class DeploymentEngine:
     # ------------------------------------------------------------------ deploy
     async def deploy(self, dep_id: str) -> None:
         tracker = StepTracker(self.ctx.db, "DEPLOY", dep_id, "deployment")
-        tracker.plan(DEPLOY_STEPS)
+        platform, _ = self._platform(dep_id)
+        tracker.plan(deploy_steps(platform))
         try:
-            await self._deploy(dep_id, tracker)
+            await self._deploy(dep_id, tracker, platform)
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001
@@ -207,7 +245,7 @@ class DeploymentEngine:
                 audit.record(s, ACTOR, event, "deployment", dep_id, {"code": code, "message": detail})
             DEPLOYMENT.transition(s, dep, "FAILED", ACTOR, detail, {"failureCode": code, "step": step})
 
-    async def _deploy(self, dep_id: str, tracker: StepTracker) -> None:
+    async def _deploy(self, dep_id: str, tracker: StepTracker, platform: Platform) -> None:
         ctx, reg = self.ctx, self.ctx.registry
         with ctx.db.session() as s:
             dep = s.get(Deployment, dep_id)
@@ -215,38 +253,42 @@ class DeploymentEngine:
             pkg = s.get(Package, dep.package_id)
             ip, asset_id, profile = asset.ip, asset.id, dep.credential_profile
             ref = PackageRef(pkg.id, pkg.name, pkg.version, pkg.sha256, pkg.size_bytes)
-            self.agent_profile = agent_profile({p: r.value for p, r in effective_fields(s, asset.id).items()})
-        winrm = reg.get(Protocol.WINRM)
-        port = await profile_port(ctx, profile)
+            fields = {p: r.value for p, r in effective_fields(s, asset.id).items()}
+            self.agent_profile = agent_profile(fields)
+        remote = reg.get(platform.protocol)
+        port = await profile_port(ctx, profile, platform.port)
+        session_step = f"{platform.access}_SESSION"
 
         tracker.start("CONNECT", f"Connecting to {ip}:{port}")
-        hc = await winrm.health_check(Target(ip, port=port))
+        hc = await remote.health_check(Target(ip, port=port))
         if not hc.ok:
             return self._fail(dep_id, tracker, "CONNECT", "CONNECT_FAILED", hc.error_detail or hc.status.value,
-                              winrm_event(hc.status))
+                              platform.event(hc.status))
         tracker.ok("CONNECT", f"TCP {ip}:{port} reachable")
 
-        tracker.start("WINRM_SESSION", "Opening WinRM session")
+        tracker.start(session_step, f"Opening {platform.label} session")
         cred = await ctx.vault.resolve(profile, purpose=f"deployment {dep_id}", correlation_id=get_correlation_id())
         stages: list[dict[str, Any]] = []
 
         async def on_stage(st: Stage) -> None:
             stages.append({"name": st.name, "status": st.status.value, "detail": st.detail})
-            tracker.update("WINRM_SESSION", f"{st.name}: {st.detail}", data={"stages": list(stages)})
+            tracker.update(session_step, f"{st.name}: {st.detail}", data={"stages": list(stages)})
 
-        res, session = await winrm.open_session(Target(ip, port=port, credential=cred), on_stage)
+        res, session = await remote.open_session(Target(ip, port=port, credential=cred,
+                                                        options=platform.options(fields)), on_stage)
         if session is None:
-            return self._fail(dep_id, tracker, "WINRM_SESSION", f"WINRM_{res.status.value}",
-                              res.error_detail or res.status.value, winrm_event(res.status))
-        tracker.ok("WINRM_SESSION", f"Session created as {cred.username} (vault profile {profile})", {"stages": stages})
+            return self._fail(dep_id, tracker, session_step, f"{platform.access}_{res.status.value}",
+                              res.error_detail or res.status.value, platform.event(res.status))
+        tracker.ok(session_step, f"Session created as {cred.username} (vault profile {profile})", {"stages": stages})
 
         try:
-            await self._install(dep_id, tracker, winrm, session, ref, asset_id)
+            await self._install(dep_id, tracker, remote, session, ref, asset_id, platform, profile)
         finally:
-            await winrm.close_session(session)
+            await remote.close_session(session)
 
     async def _install(self, dep_id: str, tracker: StepTracker, winrm, session: RemoteSession, ref: PackageRef,
-                       asset_id: str) -> None:
+                       asset_id: str, platform: Platform, profile: str) -> None:
+        """``winrm``: the adapter that owns the session (WinRM or SSH; the name is historical)."""
         ctx = self.ctx
         tracker.start("RETRIEVE_CREDENTIAL", "Minting the agent's single-use enrollment credential")
         token, token_hash = opaque_token("enr")
@@ -279,7 +321,7 @@ class DeploymentEngine:
                          {"package": ref.package_id, "path": xfer.remote_path, "bytes": xfer.bytes_transferred})
 
         cleanup = {"paths": [xfer.remote_path]}
-        tracker.start("VERIFY_HASH", "Get-FileHash -Algorithm SHA256")
+        tracker.start("VERIFY_HASH", platform.hash_command)
         r = await winrm.execute(session, RemoteOperation.VERIFY_FILE_HASH, {"path": xfer.remote_path,
                                                                              "sha256": ref.sha256})
         if not r.ok:
@@ -289,12 +331,12 @@ class DeploymentEngine:
                               "DEPLOY_HASH_FAIL")
         tracker.ok("VERIFY_HASH", f"SHA-256 matches repository ({ref.sha256[:12]}…)")
 
-        tracker.start("INSTALL", f"Installing {ref.name} {ref.version} as service OTProbeAgent "
+        tracker.start("INSTALL", f"Installing {ref.name} {ref.version} as service {platform.service} "
                                  f"(profile {self.agent_profile})")
         r = await winrm.execute(session, RemoteOperation.INSTALL_AGENT, {
             "version": ref.version, "path": xfer.remote_path, "enrollment_token": token, "deployment_id": dep_id,
             "server_url": server_url(ctx), "ca_sha256": ctx.settings.ca_sha256, "sha256": ref.sha256,
-            "profile": self.agent_profile, "by": "OT-WINDOWS-INSTALLER"})
+            "profile": self.agent_profile, "by": profile})
         if not r.ok:
             await winrm.execute(session, RemoteOperation.REMOVE_FILES, cleanup)
             return self._fail(dep_id, tracker, "INSTALL", r.error_code or "INSTALL_FAILED",
@@ -309,16 +351,17 @@ class DeploymentEngine:
                 events.stage(s, "asset.updated", "asset", asset_id, {"agentState": "ENROLLING"})
             tracker.ok("INSTALL", f"Installed to {r.raw.get('path')} (exit code 0); enrollment bundle written")
 
-            tracker.start("SERVICE_CREATED", "Querying service OTProbeAgent")
-            r = await winrm.execute(session, RemoteOperation.QUERY_SERVICE, {"name": "OTProbeAgent"})
+            tracker.start("SERVICE_CREATED", f"Querying service {platform.service}")
+            r = await winrm.execute(session, RemoteOperation.QUERY_SERVICE, {"name": platform.service})
             svc = r.raw.get("service")
             if not svc:
                 return self._fail(dep_id, tracker, "SERVICE_CREATED", "SERVICE_MISSING",
-                                  "Service OTProbeAgent not found", "DEPLOY_INSTALL_FAIL")
+                                  f"Service {platform.service} not found", "DEPLOY_INSTALL_FAIL")
             tracker.ok("SERVICE_CREATED", f"Service {svc['name']} created (start type {svc['start_type']})")
 
-            tracker.start("START_SERVICE", "Start-Service OTProbeAgent")
-            r = await winrm.execute(session, RemoteOperation.START_SERVICE, {"name": "OTProbeAgent"})
+            tracker.start("START_SERVICE", f"Start-Service {platform.service}" if platform.os == "windows"
+                          else f"{platform.service} start")
+            r = await winrm.execute(session, RemoteOperation.START_SERVICE, {"name": platform.service})
             if not r.ok:
                 return self._fail(dep_id, tracker, "START_SERVICE", "SERVICE_START_FAILED", r.error_detail or "",
                                   "DEPLOY_INSTALL_FAIL")

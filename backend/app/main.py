@@ -17,7 +17,6 @@ from typing import Any, Callable, Iterable, Sequence
 from fastapi import APIRouter, FastAPI
 from sqlalchemy import select
 
-from app.adapters.base import Protocol
 from app.adapters.registry import AdapterRegistry, parse_overrides
 from app.adapters.vault import LocalCredentialVault
 from app.api.v1 import router as api_v1
@@ -60,7 +59,7 @@ class Environment(typing.Protocol):
 
 def _live_parts(settings: Settings, db: Database, registry: AdapterRegistry) -> dict:
     from app.adapters.real import NetworkGate, register_real
-    from app.adapters.real.winrm import RealPackageTransfer
+    from app.adapters.real.transfer import RealPackageTransfer
 
     with db.session() as s:
         for username, password in seed_live_users(s, settings):
@@ -77,7 +76,7 @@ def _live_parts(settings: Settings, db: Database, registry: AdapterRegistry) -> 
                     return b.path
         return None
 
-    transfer = RealPackageTransfer(lambda: registry.get(Protocol.WINRM), resolve_build)
+    transfer = RealPackageTransfer(registry.get, resolve_build)
     return {"transfer": transfer, "gate": gate, "extras": {}}
 
 

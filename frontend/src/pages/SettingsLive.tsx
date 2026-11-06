@@ -223,7 +223,8 @@ function VaultPanel({ admin }: { admin: boolean }) {
       <ErrorBox error={vault.error ?? save.error ?? remove.error} />
       <p className="hint">Secrets are encrypted at rest and write-only: the API never returns them. Discovery and probes use
         OT-SNMPV3-RO, OT-WINDOWS-READONLY and OT-LINUX-SSH-RO. Agent deployment, removal and restart use
-        OT-WINDOWS-INSTALLER (an administrator account on the target).</p>
+        OT-WINDOWS-INSTALLER (an administrator account on Windows) or OT-LINUX-SSH-INSTALLER (SSH, root or an account
+        with sudo on Linux). Linux hosts need an agentless SSH probe first, so OTProbe knows their host key.</p>
     </Panel>
   );
 }

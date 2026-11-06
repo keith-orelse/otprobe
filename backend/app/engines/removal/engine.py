@@ -8,13 +8,14 @@ import logging
 
 from sqlalchemy import select
 
-from app.adapters.base import Protocol, RemoteOperation, RemoteSession, Target
+from app.adapters.base import RemoteOperation, RemoteSession, Target
 from app.context import AppContext
 from app.core import audit, events
 from app.core.audit import system
 from app.core.clock import utcnow
 from app.core.correlation import get_correlation_id
-from app.engines.remote import profile_port
+from app.engines.inventory import effective_fields
+from app.engines.remote import Platform, installer_profile, platform_for, profile_port
 from app.models import Agent, AgentTask, AssessmentRun, Asset, Removal
 from app.workflow.machine import AGENT, ASSESSMENT, REMOVAL, TASK
 from app.workflow.steps import StepTracker
@@ -23,7 +24,6 @@ log = logging.getLogger("otprobe.removal")
 ACTOR = system("removal-engine")
 STEPS = ["STOP_ASSESSMENTS", "CONNECT", "STOP_AGENT", "UNINSTALL", "REVOKE_IDENTITY", "REMOVE_TEMP_FILES",
          "VALIDATE_DEVICE", "ROLLBACK_COMPLETED"]
-STAGING = "C:/ProgramData/OTProbe/staging"
 
 
 class StepFailed(Exception):
@@ -88,6 +88,9 @@ class RemovalEngine:
             agent = s.get(Agent, rem.agent_id)
             asset = s.get(Asset, rem.asset_id)
             ip, agent_id, asset_id = asset.ip, agent.id, asset.id
+            fields = {p: r.value for p, r in effective_fields(s, asset.id).items()}
+            platform = platform_for(fields)
+            profile = installer_profile(s, agent, platform)
 
         tracker.start("STOP_ASSESSMENTS", "Cancelling queued and running assessment tasks")
         with db.session() as s:
@@ -102,25 +105,25 @@ class RemovalEngine:
                 cancelled += 1
         tracker.ok("STOP_ASSESSMENTS", f"{cancelled} task(s) cancelled; scheduler skips agents being removed")
 
-        winrm = ctx.registry.get(Protocol.WINRM)
-        port = await profile_port(ctx, "OT-WINDOWS-INSTALLER")
-        tracker.start("CONNECT", f"WinRM {ip}:{port}")
-        cred = await ctx.vault.resolve("OT-WINDOWS-INSTALLER", purpose=f"removal {removal_id}",
-                                       correlation_id=get_correlation_id())
-        res, session = await winrm.open_session(Target(ip, port=port, credential=cred))
+        remote = ctx.registry.get(platform.protocol)
+        port = await profile_port(ctx, profile, platform.port)
+        tracker.start("CONNECT", f"{platform.label} {ip}:{port}")
+        cred = await ctx.vault.resolve(profile, purpose=f"removal {removal_id}", correlation_id=get_correlation_id())
+        res, session = await remote.open_session(Target(ip, port=port, credential=cred,
+                                                        options=platform.options(fields)))
         if session is None:
-            raise StepFailed("CONNECT", f"WINRM_{res.status.value}", res.error_detail or res.status.value)
+            raise StepFailed("CONNECT", f"{platform.access}_{res.status.value}", res.error_detail or res.status.value)
         tracker.ok("CONNECT", f"Session created as {cred.username}")
         try:
-            await self._steps(removal_id, agent_id, asset_id, tracker, winrm, session)
+            await self._steps(removal_id, agent_id, asset_id, tracker, remote, session, platform)
         finally:
-            await winrm.close_session(session)
+            await remote.close_session(session)
 
     async def _steps(self, removal_id: str, agent_id: str, asset_id: str, tracker: StepTracker, winrm,
-                     session: RemoteSession) -> None:
-        db = self.ctx.db
-        tracker.start("STOP_AGENT", "Stop-Service OTProbeAgent")
-        r = await winrm.execute(session, RemoteOperation.STOP_SERVICE, {"name": "OTProbeAgent"})
+                     session: RemoteSession, platform: Platform) -> None:
+        db, svc = self.ctx.db, platform.service
+        tracker.start("STOP_AGENT", f"Stop-Service {svc}" if platform.os == "windows" else f"{svc} stop")
+        r = await winrm.execute(session, RemoteOperation.STOP_SERVICE, {"name": svc})
         tracker.ok("STOP_AGENT", "Service stopped" if r.ok else "Service not present (already stopped)")
 
         tracker.start("UNINSTALL", "otprobe-agent uninstall; removing program and data folders")
@@ -136,17 +139,17 @@ class RemovalEngine:
             prefix = agent.credential_prefix
         tracker.ok("REVOKE_IDENTITY", f"Credential {prefix}… revoked: any further call is rejected (401)")
 
-        tracker.start("REMOVE_TEMP_FILES", f"Remove-Item {STAGING}")
-        await winrm.execute(session, RemoteOperation.REMOVE_FILES, {"paths": [STAGING]})
+        tracker.start("REMOVE_TEMP_FILES", f"Removing {platform.staging}")
+        await winrm.execute(session, RemoteOperation.REMOVE_FILES, {"paths": [platform.staging]})
         tracker.ok("REMOVE_TEMP_FILES", "Staging and temporary files removed")
 
         tracker.start("VALIDATE_DEVICE", "Verifying nothing of the agent remains")
         installed = (await winrm.execute(session, RemoteOperation.QUERY_AGENT_INSTALLED, {})).raw.get("installed")
-        query = await winrm.execute(session, RemoteOperation.QUERY_SERVICE, {"name": "OTProbeAgent"})
+        query = await winrm.execute(session, RemoteOperation.QUERY_SERVICE, {"name": svc})
         service = query.raw.get("service")
         if installed or service:
             raise StepFailed("VALIDATE_DEVICE", "RESIDUE_FOUND", "Agent files or service still present on host")
-        tracker.ok("VALIDATE_DEVICE", "No agent files, no OTProbeAgent service")
+        tracker.ok("VALIDATE_DEVICE", f"No agent files, no {svc} service")
 
         tracker.start("ROLLBACK_COMPLETED", "Finalising")
         with db.session() as s:

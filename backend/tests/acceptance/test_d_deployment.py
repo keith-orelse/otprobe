@@ -194,7 +194,7 @@ async def test_agent_heartbeat_before_enrolling_still_completes(discovered):
     await precheck(h, dep["id"])
     original = deploy_engine.DeploymentEngine._install
 
-    async def install_then_agent_races(self, dep_id, tracker, winrm, session, ref, asset_id):
+    async def install_then_agent_races(self, dep_id, tracker, winrm, session, ref, asset_id, *rest):
         real_execute = winrm.execute
 
         async def execute(sess, op, params):
@@ -212,7 +212,7 @@ async def test_agent_heartbeat_before_enrolling_still_completes(discovered):
 
         winrm.execute = execute
         try:
-            return await original(self, dep_id, tracker, winrm, session, ref, asset_id)
+            return await original(self, dep_id, tracker, winrm, session, ref, asset_id, *rest)
         finally:
             winrm.execute = real_execute
 

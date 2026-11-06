@@ -29,6 +29,7 @@ from pypsrp.exceptions import AuthenticationError, WinRMTransportError, WSManFau
 
 from app.adapters.base import Credential
 from app.adapters.real.net import tcp
+from app.adapters.real.net.agent_params import AGENT_PARAMS
 from app.adapters.real.net.gate import NetworkGate
 
 _J = " | ConvertTo-Json -Compress -Depth 4"
@@ -97,12 +98,7 @@ INSTALL_DIR = "C:\\Program Files\\OTProbe\\Agent"
 DATA_DIR = "C:\\ProgramData\\OTProbe"
 DEPLOY_PARAMS = {
     "path": re.compile(r"^C:\\ProgramData\\OTProbe\\staging(\\otprobe-agent-[0-9A-Za-z.-]{1,80}\.exe)?$"),
-    "sha256": re.compile(r"^[0-9a-f]{64}$"),
-    "token": re.compile(r"^enr_[A-Za-z0-9_-]{20,128}$"),
-    "server_url": re.compile(r"^https://[A-Za-z0-9.-]{1,253}(:\d{1,5})?/?$"),
-    "ca_sha256": re.compile(r"^([0-9a-f]{64})?$"),
-    "deployment_id": re.compile(r"^[0-9a-f-]{36}$"),
-    "profile": re.compile(r"^[a-z0-9-]{1,48}$"),
+    **AGENT_PARAMS,
 }
 DEPLOY_SCRIPTS: dict[str, str] = {
     "make_staging": f"New-Item -ItemType Directory -Force -Path '{STAGING}' | Out-Null; 'ok'",

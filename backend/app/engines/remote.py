@@ -1,11 +1,61 @@
-"""Helpers shared by the engines that act on a host over WinRM (precheck, deployment, removal, restart)."""
+"""Helpers shared by the engines that act on a host to install, restart or remove the agent (precheck, deployment,
+removal, restart): over WinRM on Windows, over SSH on Linux."""
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlsplit
 
+from sqlalchemy.orm import Session
+
+from app.adapters.base import Protocol, ResultStatus
 from app.context import AppContext
+from app.engines.protocol_events import winrm_event
+from app.models import Agent, Deployment
+
+
+@dataclass(frozen=True)
+class Platform:
+    os: str                     # os.family of the hosts it serves
+    protocol: Protocol          # how OTProbe reaches the host to install the agent
+    access: str                 # name used in precheck checks and deploy steps: WINRM_AVAILABLE, SSH_SESSION, ...
+    label: str
+    installer_profile: str      # default vault profile for install / removal / restart
+    port: int
+    service: str                # the agent's service name on the host
+    staging: str                # what removal asks the adapter to clean up
+    hash_command: str           # shown in the VERIFY_HASH step
+
+    def options(self, fields: dict[str, Any]) -> dict[str, Any]:
+        """Session options: SSH sessions only log in to the host key pinned by an earlier probe."""
+        if self.protocol == Protocol.SSH:
+            return {"host_key": fields.get("ssh.host_key")}
+        return {}
+
+    def event(self, status: ResultStatus) -> str:
+        if self.protocol == Protocol.SSH:
+            return SSH_EVENTS.get(status, f"SSH_{status.value}")
+        return winrm_event(status)
+
+
+SSH_EVENTS = {ResultStatus.REFUSED: "SSH_CONNECTION_REFUSED", ResultStatus.TIMEOUT: "SSH_TIMEOUT",
+              ResultStatus.AUTH_FAILED: "SSH_AUTH_FAILED", ResultStatus.TLS_INVALID: "SSH_HOST_KEY_CHANGED",
+              ResultStatus.UNREACHABLE: "ASSET_UNREACHABLE"}
+WINDOWS = Platform("windows", Protocol.WINRM, "WINRM", "WinRM", "OT-WINDOWS-INSTALLER", 5986, "OTProbeAgent",
+                   "C:/ProgramData/OTProbe/staging", "Get-FileHash -Algorithm SHA256")
+LINUX = Platform("linux", Protocol.SSH, "SSH", "SSH", "OT-LINUX-SSH-INSTALLER", 22, "otprobe-agent",
+                 "/var/tmp/otprobe.*", "sha256sum")
+
+
+def platform_for(fields: dict[str, Any]) -> Platform:
+    return LINUX if fields.get("os.family") == "linux" else WINDOWS
+
+
+def installer_profile(session: Session, agent: Agent, platform: Platform) -> str:
+    """Removal and restart use the vault profile the agent was installed with (else the platform's default)."""
+    dep = session.get(Deployment, agent.deployment_id) if agent.deployment_id else None
+    return dep.credential_profile if dep is not None and dep.credential_profile else platform.installer_profile
 
 
 async def profile_port(ctx: AppContext, profile: str, default: int = 5986) -> int:
