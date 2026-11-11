@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, ForeignKey, String, Text
+from sqlalchemy import JSON, Boolean, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.clock import utcnow
@@ -38,3 +38,19 @@ class TelemetryMessage(Base):
     asset_id: Mapped[str | None] = mapped_column(String(36), index=True)
     payload: Mapped[Any] = mapped_column(JSON)
     received_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow, index=True)
+
+
+class MqttAccount(Base):
+    """A device account on the bundled broker (Mode A). The broker allows it to publish under ``topic_prefix`` only,
+    so every message on those topics is attributed to ``asset_id``. Only the Mosquitto hash of the password is kept."""
+    __tablename__ = "mqtt_accounts"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    username: Mapped[str] = mapped_column(String(64), unique=True)
+    topic_prefix: Mapped[str] = mapped_column(String(200), unique=True)
+    asset_id: Mapped[str | None] = mapped_column(ForeignKey("assets.id"), index=True)
+    description: Mapped[str] = mapped_column(Text, default="")
+    password_hash: Mapped[str] = mapped_column(String(255))
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_by: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow)
+    password_changed_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow)

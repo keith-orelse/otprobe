@@ -310,6 +310,14 @@ textarea { width: 100%; box-sizing: border-box; border: 1px solid var(--border-c
 .error-box { border: 1px solid var(--fail-border); background: var(--fail-bg); color: #a50e0e; border-radius: 12px; padding: 10px 14px;
   margin: 10px 0; font-size: 13.5px; }
 .error-box .muted { color: #c5221f; opacity: 0.75; }
+.notice { border: 1px solid var(--warn-border); background: var(--warn-bg); border-radius: 12px; padding: 12px 14px;
+  margin: 0 0 14px; font-size: 13.5px; }
+.notice code { word-break: break-all; }
+pre.log { max-height: 280px; overflow: auto; background: var(--surface-solid); border: 1px solid var(--border-color-solid);
+  border-radius: 8px; padding: 8px; white-space: pre-wrap; }
+.row-actions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.row-actions .btn { white-space: nowrap; }
+select.compact { width: auto; max-width: 200px; }
 .value-list summary { cursor: pointer; color: var(--brand); font-weight: 600; }
 .value-list ul { margin: 6px 0; padding-left: 18px; }
 details.result { border-bottom: 1px solid var(--border-color-solid); padding: 8px 0; }

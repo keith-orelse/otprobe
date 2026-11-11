@@ -9,7 +9,7 @@ GROUPS: dict[str, list[str]] = {
     "Network": ["network.ip", "network.mac", "reachability.icmp", "reachability.rtt_ms", "network.interfaces",
                 "network.active_ports", "network.lldp_neighbors", "network.listening", "network.connections",
                 "network.open_ports", "network.arp_via", "ot.protocols", "ot.device_type", "opcua.security_policies",
-                "mqtt.client_id", "mqtt.topics", "mqtt.broker"],
+                "mqtt.client_id", "mqtt.account", "mqtt.topics", "mqtt.broker"],
     "Hardware": ["hardware.manufacturer", "hardware.cpu", "hardware.ram_gb", "hardware.disk",
                  "hardware.arch", "hardware.uptime_sec", "snmp.uptime_sec"],
     "OS": ["os.family", "os.name", "os.product", "os.version", "os.build", "os.kernel", "firmware.version",

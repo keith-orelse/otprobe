@@ -20,7 +20,7 @@ from app.models.inventory import (
     ProbeRun,
     Zone,
 )
-from app.models.operations import Removal, TelemetryMessage
+from app.models.operations import MqttAccount, Removal, TelemetryMessage
 from app.models.platform import AuditEvent, IdempotencyKey, WorkflowStep
 from app.models.safety import AgentBuild, SafetyState, ScanScope
 from app.models.trust import (
@@ -39,5 +39,5 @@ __all__ = [
     "ProbeResult", "ProbeRun", "Zone", "AuditEvent", "IdempotencyKey", "WorkflowStep",
     "Agent", "Approval", "Deployment", "EnrollmentToken", "Heartbeat", "Package",
     "PrecheckResult", "User", "AgentTask", "AssessmentRun", "DriftEvent", "EvidenceChange", "Finding", "FindingEvent",
-    "Policy", "RuleResult", "Removal", "TelemetryMessage", "ScanScope", "SafetyState", "AgentBuild",
+    "Policy", "RuleResult", "Removal", "TelemetryMessage", "MqttAccount", "ScanScope", "SafetyState", "AgentBuild",
 ]

@@ -778,4 +778,66 @@ class TelemetryRecord(Camel):
     received_at: datetime
 
 
+# ---------------------------------------------------------------- Bundled MQTT broker (Mode A, docs/MQTT_BROKER.md)
+MQTT_USERNAME = r"^[a-z0-9][a-z0-9_.-]{2,63}$"
+
+
+class MqttAccountCreate(Camel):
+    username: str = Field(pattern=MQTT_USERNAME, examples=["sensor01"])
+    topic_prefix: str = Field(min_length=1, max_length=200, examples=["plant/line1/sensor01"],
+                              description="The device may publish under this prefix only (no wildcards)")
+    asset_id: str | None = Field(None, description="Asset its messages belong to; can be linked later")
+    description: str = Field("", max_length=500)
+
+
+class MqttAccountUpdate(Camel):
+    asset_id: str | None = None          # send null to unlink
+    enabled: bool | None = None
+    description: str | None = Field(None, max_length=500)
+
+
+class MqttAccount(Camel):
+    username: str
+    topic_prefix: str
+    asset_id: str | None
+    asset_name: str | None = None
+    description: str
+    enabled: bool
+    created_by: str
+    created_at: datetime
+    password_changed_at: datetime
+    connected: bool = False
+    connections: list[dict[str, Any]] = []
+    last_seen: dict[str, Any] | None = None
+    last_message_at: datetime | None = None
+    topics: list[str] = []
+
+
+class MqttAccountSecret(Camel):
+    """Returned once, on create and on a new password. OTProbe keeps only the broker's hash."""
+    account: MqttAccount
+    password: str
+    connection: dict[str, Any]
+
+
+class MqttBrokerStatus(Camel):
+    mode: Literal["bundled", "off"]
+    running: bool = False
+    pid: int | None = None
+    version: str = ""
+    binary: str | None = None
+    started_at: datetime | None = None
+    restarts: int = 0
+    error: str = ""
+    host: str = ""
+    listeners: list[dict[str, Any]] = []
+    checks: list[dict[str, Any]] = []
+    connected: int = 0
+    accounts: int = 0
+    dropped: dict[str, int] = {}
+    refused: list[dict[str, Any]] = []
+    log: list[str] = []                  # admins only
+    ca_available: bool = False
+
+
 Agent.model_rebuild()

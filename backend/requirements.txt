@@ -14,5 +14,6 @@ icmplib>=3.0
 pysnmp>=7.1
 asyncssh>=2.17
 pypsrp>=0.8
+paho-mqtt>=2.1
 asyncua>=1.1
 httpx>=0.27

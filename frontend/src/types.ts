@@ -154,7 +154,7 @@ export interface Removal { id: string; assetId: string; assetName: string | null
 
 export interface TelemetryTopic { topic: string; clientId: string; assetId: string | null; assetName: string | null;
   lastPayload: any; lastAt: string; messages: number; openFindings: string[];
-  recent: { at: string; payload: Record<string, any> }[] }
+  recent: { at: string; payload: any }[] }
 
 export interface NavCounts { pendingApprovals: number; openFindings: number; criticalFindings: number;
   agentsAttention: number; rogueAssets: number; runningWorkflows: number }
@@ -175,3 +175,21 @@ export interface PluginInfo { name: string; label: string; protocol: string; por
 
 export interface AgentBuild { id: string; version: string; buildId: string; os: string; arch: string; variant: string;
   file: string; sha256: string; sizeBytes: number; minOs: string; registeredAt: string }
+
+export interface MqttCheck { ruleId: string; title: string; severity: string; status: "PASS" | "FAIL" | "UNKNOWN";
+  detail: string }
+
+export interface MqttBrokerStatus { mode: "bundled" | "off"; running: boolean; pid: number | null; version: string;
+  binary: string | null; startedAt: string | null; restarts: number; error: string; host: string;
+  listeners: { port: number; tls: boolean; bind: string }[]; checks: MqttCheck[]; connected: number; accounts: number;
+  dropped: Record<string, number>; refused: { clientId: string; ip: string; at: string }[]; log: string[];
+  caAvailable: boolean }
+
+export interface MqttAccount { username: string; topicPrefix: string; assetId: string | null; assetName: string | null;
+  description: string; enabled: boolean; createdBy: string; createdAt: string; passwordChangedAt: string;
+  connected: boolean; connections: { clientId: string; ip: string; connectedAt: string }[];
+  lastSeen: { ip: string; clientId: string; at: string } | null; lastMessageAt: string | null; topics: string[] }
+
+export interface MqttAccountSecret { account: MqttAccount; password: string;
+  connection: { host: string; port: number | null; tls: boolean; username: string; topic: string;
+    caCertificate: string | null } }

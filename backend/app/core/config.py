@@ -53,6 +53,15 @@ class Settings:
     agent_release_pubkey: str = ""      # base64 Ed25519 public key (or AGENT_RELEASE_PUBKEY_FILE)
     public_url: str = ""                # what agents and install scripts use, e.g. https://192.168.0.160:8000
     tls_ca_file: str = ""               # CA that signed the server certificate; its SHA-256 is pinned in agents
+    # Bundled MQTT broker, Mode A (docs/MQTT_BROKER.md)
+    mqtt_broker: str = "off"            # "bundled" runs Mosquitto next to OTProbe; "off" = no MQTT telemetry
+    mqtt_binary: str = ""               # path to mosquitto; found on PATH / usual places when empty
+    mqtt_dir: str = ""                  # the broker's files; "mqtt" next to the database when empty
+    mqtt_port: int = 8883               # devices, TLS
+    mqtt_plain_port: int = 0            # devices without TLS (off; raises MQTT-BRK-002 while on)
+    mqtt_bind: str = ""                 # listen address for devices; every interface when empty
+    mqtt_tls_cert_file: str = ""        # default: otprobe-server.pem next to OTPROBE_TLS_CA_FILE
+    mqtt_tls_key_file: str = ""         # default: otprobe-server.key next to OTPROBE_TLS_CA_FILE
 
     @property
     def live(self) -> bool:
@@ -69,6 +78,17 @@ class Settings:
         from cryptography.hazmat.primitives.serialization import Encoding
         cert = x509.load_pem_x509_certificate(Path(self.tls_ca_file).read_bytes())
         return hashlib.sha256(cert.public_bytes(Encoding.DER)).hexdigest()
+
+    def mqtt_files(self) -> tuple[str, str, str]:
+        """(broker folder, server certificate, server key) with their defaults filled in."""
+        folder = self.mqtt_dir
+        if not folder:
+            db = self.database_url.removeprefix("sqlite:///")
+            folder = str(Path(db).resolve().parent / "mqtt") if db != self.database_url else "./mqtt"
+        tls_dir = Path(self.tls_ca_file).parent if self.tls_ca_file else None
+        cert = self.mqtt_tls_cert_file or (str(tls_dir / "otprobe-server.pem") if tls_dir else "")
+        key = self.mqtt_tls_key_file or (str(tls_dir / "otprobe-server.key") if tls_dir else "")
+        return folder, cert, key
 
     @classmethod
     def from_env(cls, **overrides) -> "Settings":
@@ -100,6 +120,14 @@ class Settings:
             agent_release_pubkey=env.get("AGENT_RELEASE_PUBKEY", "") or _read(env.get("AGENT_RELEASE_PUBKEY_FILE")),
             public_url=env.get("OTPROBE_PUBLIC_URL", ""),
             tls_ca_file=env.get("OTPROBE_TLS_CA_FILE", ""),
+            mqtt_broker=env.get("MQTT_BROKER", "off").lower(),
+            mqtt_binary=env.get("MQTT_BINARY", ""),
+            mqtt_dir=env.get("MQTT_DIR", ""),
+            mqtt_port=int(env.get("MQTT_PORT", 8883)),
+            mqtt_plain_port=int(env.get("MQTT_PLAIN_PORT", 0)),
+            mqtt_bind=env.get("MQTT_BIND", ""),
+            mqtt_tls_cert_file=env.get("MQTT_TLS_CERT_FILE", ""),
+            mqtt_tls_key_file=env.get("MQTT_TLS_KEY_FILE", ""),
         )
         values.update(overrides)
         return cls(**values)

@@ -1,112 +1,175 @@
-# Bundled MQTT broker
+# Bundled MQTT broker (Mode A)
 
-OTProbe ships its own broker (decision R5): **Eclipse Mosquitto 2.0.x**, pinned to an exact image version and
-started by the same `docker compose`. Plant devices publish telemetry to it. OTProbe **subscribes only**, and
-turns readings into telemetry findings with the existing rules.
+OTProbe runs its own broker, **Eclipse Mosquitto 2.x**, for sites that have none. Plant devices publish telemetry to
+it, and OTProbe **only reads**. Readings become telemetry findings through `rules/telemetry.yaml`. Connecting
+read-only to a plant's existing broker (Mode B) is not built yet.
 
-## 1. Defaults
+```
+OTProbe machine
+├── OTProbe API ── otprobe-reader (subscribe only, 127.0.0.1) ──┐
+└── Mosquitto (child process of OTProbe) ◀──────────────────────┘
+          ▲  port 8883, TLS, one account per device
+PLCs / sensors / gateways (publish only, each under its own topic prefix)
+```
+
+## 1. How it runs
+
+`MQTT_BROKER=bundled` makes OTProbe start Mosquitto as a **child process** (decision L6-10). OTProbe:
+
+- writes the broker's files into `MQTT_DIR` (default: `mqtt/` next to the database), owner-only (`0600`);
+- starts it and waits until it reports "running";
+- restarts it if it exits (after 2, 5, 10, then every 30 s);
+- reloads it (`SIGHUP`) when an account changes;
+- stops it when OTProbe stops.
+
+Every file is rewritten from OTProbe's database at start-up, so the database is the only source of truth.
+
+| File | Contents |
+|---|---|
+| `mosquitto.conf` | Listeners and limits (§2) |
+| `passwd` | Accounts as Mosquitto PBKDF2-SHA512 hashes (`$7$…`, the `mosquitto_passwd` format) |
+| `acl` | What each account may read and write (§3) |
+| `server.pem`, `server.key`, `ca.pem` | Copies of OTProbe's server certificate, its key and the CA |
+| `data/` | Retained messages |
+
+Mosquitto must be installed on the machine (`brew install mosquitto` on a Mac, `apt install mosquitto` on
+Debian/Ubuntu; it is included in the Docker image). If it is missing, OTProbe still starts and Settings → MQTT broker
+says so.
+
+## 2. Defaults
 
 | Setting | Default | Why |
 |---|---|---|
-| Listener | `8883`, TLS 1.2+, on the host's plant-facing interface | Encrypted by default |
-| Plain `1883` | **off** | Can be enabled by an admin for devices that cannot do TLS. Bound to listed subnets only, and raises finding `MQTT-BRK-002` while on |
-| Anonymous access | **off** (`allow_anonymous false`) | |
-| Authentication | Username + password (PBKDF2-SHA512), or client certificate per account | Certificates are recommended for gateways that support them |
-| Authorisation | Mosquitto **dynamic security plugin** (roles and ACLs) | OTProbe manages accounts live, without restarting the broker |
-| Certificates | Server certificate issued by the OTProbe CA (the same CA the agents pin) | One CA for the site. The CA certificate is downloadable from the console for device setup |
-| Limits | `max_packet_size 256 KiB`, `max_connections 1000`, `max_inflight_messages 20` | Protects the broker from a misbehaving publisher |
-| Persistence | Retained messages and the dynsec config on a volume | Survives restarts |
-| Logs | stdout → `docker logs`; connection refusals are counted on the dashboard | |
+| Device listener | `MQTT_PORT=8883`, TLS, every interface (`MQTT_BIND` to restrict it) | Encrypted by default |
+| Certificate | OTProbe's server certificate: `otprobe-server.pem/.key` next to `OTPROBE_TLS_CA_FILE` (or `MQTT_TLS_CERT_FILE` / `MQTT_TLS_KEY_FILE`) | One CA for the site, the same one the agents pin. Devices download it from Settings → MQTT broker → Download CA certificate (`GET /api/v1/mqtt/ca.pem`) |
+| Plain MQTT | `MQTT_PLAIN_PORT=0`, **off** | For devices that cannot do TLS. Check MQTT-BRK-002 fails while it is on |
+| OTProbe's own listener | 127.0.0.1 only, a random port each start | Only OTProbe's reader uses it. It still needs a password |
+| Anonymous access | **off** (`allow_anonymous false`) | Checked live at every start (MQTT-BRK-001) |
+| Limits | 256 KiB per message, 1000 connections per listener, 20 messages in flight, 1000 queued | A misbehaving device cannot exhaust the broker |
 
-## 2. Accounts and roles
+Without a certificate, there is no device listener (unless plain MQTT is turned on). MQTT-BRK-004 then fails with
+a clear message.
 
-Admins manage accounts in **Settings → MQTT** (`/api/v1/mqtt/accounts`). OTProbe applies them to Mosquitto
-through the dynsec control topic (`$CONTROL/dynamic-security/v1`).
+## 3. Accounts
 
-| Role | Can publish | Can subscribe | Created by |
-|---|---|---|---|
-| `otprobe-reader` | nothing | configured topic roots (default `plant/#`), plus `$SYS/#` | Seeded. Used by the OTProbe `api` |
-| `otprobe-broker-admin` | `$CONTROL/dynamic-security/#` only | its response topic | Seeded. Used by the `api` **only** to manage accounts. Password in the vault |
-| `publisher` | its own prefix only, e.g. `plant/line1/sensor01/#` | nothing | Admin, one per device or gateway |
-| `gateway` | a prefix with sub-levels, e.g. `plant/line1/#` | nothing | Admin, for edge gateways that publish for many devices |
+Admins manage device accounts in **Settings → MQTT device accounts** (`/api/v1/mqtt/accounts`).
 
-- **Passwords are shown once.** The API returns a new account's password a single time; after that it is stored
-  only in the broker (hashed) and masked in OTProbe.
-- Every account change is audited: `MQTT_ACCOUNT_CREATED`, `…_DISABLED`, `…_PASSWORD_ROTATED`.
-- An account's ACL can never be `#` for publish. The API refuses it (`422 mqtt-acl-too-broad`).
+| Account | May publish | May read |
+|---|---|---|
+| `otprobe-reader` | **nothing** | `#` and `$SYS/#`. Used by OTProbe; a new random password every start, never stored |
+| one per device or gateway, e.g. `sensor01` | its own **topic prefix** only, e.g. `plant/line1/sensor01` and everything under it | **nothing** |
 
-## 3. Topic → asset mapping
+- **One sender per topic.** A prefix is plain topic levels: no `+` or `#`, no `$`, at most 10 levels. Prefixes may not
+  overlap (`plant/line1` and `plant/line1/sensor01` cannot both exist; `422 mqtt-acl-too-broad`,
+  `409 mqtt-prefix-overlap`). So the broker guarantees that every message on a topic comes from exactly one account.
+- **Usernames:** lowercase letters, digits, `.`, `_`, `-`, 3–64 characters, not starting with `otprobe`.
+- **The password is shown once**, on create and on **New password**. OTProbe stores only the Mosquitto hash.
+- **Disable, Delete and New password take effect at once.** Mosquitto re-reads the files and disconnects that
+  device. For a new password, OTProbe first removes the account (which disconnects the device), then writes it back
+  with the new hash. A disabled device cannot log in again.
+- Operators and approvers can see accounts and who is connected. Only admins can change them. Every change is
+  audited:
+  - `MQTT_ACCOUNT_CREATED`
+  - `MQTT_ACCOUNT_UPDATED` (asset link, description)
+  - `MQTT_ACCOUNT_DISABLED`
+  - `MQTT_ACCOUNT_ENABLED`
+  - `MQTT_ACCOUNT_PASSWORD_ROTATED`
+  - `MQTT_ACCOUNT_DELETED`
+- **Who is connected** comes from the broker's own log, which gives the account, the device's MQTT client id and its
+  IP address. The console shows:
+  - connected devices;
+  - for each account, where it last connected from;
+  - the last 20 refused logins (admins only), for example a wrong password or a disabled account.
 
-Telemetry sources (`/api/v1/telemetry/sources`) tie topics to assets and metrics:
+## 4. Messages → assets
 
-| Field | Example |
+A message belongs to the **account allowed to publish its topic** (§3). Its asset is:
+
+1. the asset **linked to the account**: choose it when you create the account, or later in the account list.
+   Linking also moves the messages already received; or else
+2. the asset whose IP address is the address the device **connects from**, if one has been discovered.
+
+Topics with no asset show as **not linked** on the Telemetry page. They are stored, but rules run only on messages that
+have an asset. The agentless probe's MQTT step reports the device connected from the asset's address:
+- `mqtt.client_id`
+- `mqtt.account`
+- `mqtt.topics`
+- `mqtt.broker`
+
+**Payloads:**
+- **JSON** is stored as it is: numbers, or objects such as `{"temperature": 72.4, "unit": "C"}`.
+- **Other text** is stored as text.
+- **Binary payloads** (for example Sparkplug B) and **messages over 16 KiB** are counted, not stored. They show as
+  "not stored" on the broker panel.
+
+Storage keeps the most recent `TELEMETRY_RETENTION` messages (10 000).
+
+## 5. Telemetry rules
+
+Rules in `rules/telemetry.yaml` match a **metric**, not a fixed device. With `topic: "#"`, a rule applies to every topic
+whose message carries its evidence. Rules see each message as an object:
+
+| Message | Rules see |
 |---|---|
-| `topicFilter` | `plant/line1/sensor01/temperature` or `plant/line1/+/temperature` |
-| `assetId` | `ast_…` (or `fromTopicLevel: 2` to match the level against the asset name) |
-| `metric` | `temperature` |
-| `unit` | `C` |
-| `payloadFormat` | `PLAIN` (a number) · `JSON_PATH` (`$.value`) · `SPARKPLUG_B` (L5 stretch goal) |
-
-- **Unmapped topics** are not dropped. The console lists them (topic, last payload, message rate, publishing
-  account) so an operator can map them with one click.
-- Messages are validated (size, number parse) before rules run. Bad payloads are counted, not stored.
-- Retention: raw messages for 7 days (configurable), then hourly min/avg/max per source.
-
-## 4. Telemetry rules
-
-`rules/telemetry.yaml` keeps its format. Rules can refer to a **metric** on a class of asset instead of a fixed
-topic, so the same rule works across a site:
-
-```yaml
-- id: TEL-TEMP-002
-  title: Sensor temperature critical
-  applies_to: { metric: "== 'temperature'", asset.class: "== 'SENSOR'" }
-  condition: "<= 95"
-  on_fail: { status: FAIL, severity: CRITICAL }
-- id: TEL-STALE-001
-  title: Telemetry source silent
-  applies_to: { metric: "exists" }
-  stale_after_sec: 30
-  on_stale: { status: FAIL, severity: HIGH }
-```
-
-Findings, drift and the staleness timer work as in the POC.
-
-## 5. Broker security checks
-
-**Our own broker** is checked at start-up and every hour. Problems become findings on the OTProbe server asset:
+| `{"temperature": 72.4, "unit": "C"}` on any topic | `temperature: 72.4`, `unit: "C"` |
+| `72.4` on `plant/line1/sensor01/temperature` | `temperature: 72.4` (named after the topic's last level) |
+| `RUN` on `plant/line1/plc01/mode` | `mode: "RUN"` |
+| anything | `mqtt.topic` as well |
 
 | Rule | Check | Severity |
 |---|---|---|
-| `MQTT-BRK-001` | Anonymous access is disabled | CRITICAL |
-| `MQTT-BRK-002` | No plaintext listener is enabled | MEDIUM |
-| `MQTT-BRK-003` | No account can publish to `#` or to `$CONTROL/#` (except the broker admin) | HIGH |
-| `MQTT-BRK-004` | Server certificate valid for > 30 days | MEDIUM |
-| `MQTT-BRK-005` | No enabled account unused for > 90 days | LOW |
+| TEL-TEMP-001 / 002 | `temperature` ≤ 80 / ≤ 95 | MEDIUM / CRITICAL |
+| TEL-PRES-001 | `pressure` ≤ 6.0 | HIGH |
+| TEL-PLC-001 | `mode` is RUN, and a status message at least every 30 s | HIGH |
+| TEL-STALE-001 | **Telemetry source silent**: no message for 5 minutes from a device that has published | HIGH |
 
-**Other brokers found in scope** (port 1883 or 8883 open during discovery) can be checked by the optional
-`mqtt_anon` plugin. It is off by default and enabled per scope entry. It sends one `CONNECT` with no credentials,
-reads the `CONNACK` code and disconnects at once. It never subscribes or publishes.
+Staleness is checked per asset, on the topics that carry the rule's evidence: a temperature sensor never trips the PLC
+rule. The next message closes the finding. To give one area its own thresholds, add a rule with a narrower topic
+filter, for example `plant/line2/#`.
+
+## 6. Broker checks
+
+OTProbe checks its own broker. The results are shown in Settings → MQTT broker; they are not stored as findings
+(decision L6-13).
 
 | Rule | Check | Severity |
 |---|---|---|
-| `NET-MQTT-001` | Broker accepts anonymous connections | HIGH |
-| `NET-MQTT-002` | Broker exposes plaintext MQTT (1883) | MEDIUM |
+| `MQTT-BRK-001` | Anonymous access is refused: OTProbe tries to connect without a password at every start | CRITICAL |
+| `MQTT-BRK-002` | No unencrypted listener | MEDIUM |
+| `MQTT-BRK-003` | No account can publish to every topic | HIGH |
+| `MQTT-BRK-004` | Server certificate valid for more than 30 days (fails if there is no certificate) | MEDIUM |
 
-## 6. Network placement
+## 7. Network placement
 
-- The broker listens on the OTProbe host. Plant firewalls must allow `8883/tcp` from publishing devices to the
-  OTProbe host, and nothing else inbound except `443` (console + agents).
-- OTProbe never connects **out** to devices over MQTT. Devices always connect in.
-- For sites that already have a plant broker, a bridge configuration (plant broker → OTProbe broker, read-only
-  topics) is documented as an option. It is not a default.
+- Devices need `8883/tcp` to the OTProbe machine, and nothing else.
+- OTProbe never connects **out** to a device over MQTT; devices always connect in.
+- Its own connection is to `127.0.0.1` only. That is why the broker code sits outside the network gate; a test proves
+  that every bind and connect in it is loopback only.
 
-## 7. Testing
+## 8. Not built (yet)
+
+| Item | Note |
+|---|---|
+| Mode B: read-only client of a plant's existing broker | Next MQTT step |
+| Sparkplug B decoding | Binary payloads are counted, not stored |
+| Gateways publishing for several assets under one account | One account maps to one asset; give each device its own account and prefix |
+| Checking other brokers found on the network (anonymous login probe) | |
+| "Account unused for 90 days" check, hourly re-check, raw/hourly retention | Retention is the existing most-recent-messages limit |
+| Bridge from a plant broker | |
+
+## 9. Testing
 
 | Test | How |
 |---|---|
-| Anonymous refused, TLS-only, ACL limits | Container test: real Mosquitto + `mosquitto_pub`/`sub` with good and bad credentials |
-| Accounts via dynsec | API creates an account → publish works on its prefix, fails outside it |
-| Topic mapping, rules, staleness | Container test: publish values over 80 / 95 °C, stop publishing → findings open and resolve |
-| Broker checks | Turn on the plaintext listener → `MQTT-BRK-002` opens. Turn it off → resolved |
-| Lab | Real devices or OpenPLC publish through a gateway account; a sensor is unplugged → `TEL-STALE-001` |
+| Broker locked down | Real Mosquitto started by OTProbe on 127.0.0.1. Checks: anonymous, unknown and plain-text logins refused; TLS only; all four checks pass; files `0600`; the log visible to admins only |
+| Accounts | Admin only; password once and only its hash on disk; wildcard, `$`, overlapping and reserved names refused |
+| Messages and rules | A real device (paho, TLS) publishes on and outside its topic: only its own arrives. Linking moves the earlier messages. Plain `97` → TEL-TEMP-002 CRITICAL; `40` → resolved; the probe's MQTT step names the device |
+| Silent device | One message, then silence → TEL-STALE-001 open (window scaled down); the next message resolves it |
+| Disconnects | Disable, new password and delete each disconnect the device at once, and the old credentials are refused |
+| OTProbe cannot publish | Its own account publishes: nothing is delivered. Killing Mosquitto: it is restarted and the accounts still work |
+| Fake sensor | `scripts/fake_sensor.py` publishes over TLS; a wrong password exits with "login refused" |
+| Files and parsing (unit) | Hash format against `mosquitto_passwd`, prefix rules, ACL and config files, log lines, payload decoding |
+| By hand | [TESTING_L6_MQTT.md](TESTING_L6_MQTT.md): the broker on your Mac, a fake sensor on a second machine |
+
+Tests: `tests/live/test_mqtt_broker.py`, `tests/unit/test_mqtt_broker_files.py`. They need Mosquitto installed; tests
+that need it are skipped without it.

@@ -359,3 +359,38 @@ class CredentialVault(abc.ABC):
 
     @abc.abstractmethod
     async def delete(self, profile: str) -> None: ...
+
+
+@dataclass(frozen=True)
+class BrokerAccount:
+    """A device account on the bundled MQTT broker (docs/MQTT_BROKER.md §2). ``password_hash`` is in Mosquitto's own
+    format; the broker may publish under ``topic_prefix`` and nothing else."""
+    username: str
+    password_hash: str
+    topic_prefix: str
+    enabled: bool = True
+
+
+class MqttBroker(abc.ABC):
+    """The bundled broker that plant devices publish to (Mode A). OTProbe only reads from it."""
+
+    last_seen: dict[str, dict[str, Any]]     # username -> {"ip", "clientId", "at"} of its latest connection
+
+    @abc.abstractmethod
+    async def start(self, accounts: Sequence[BrokerAccount]) -> None: ...
+
+    @abc.abstractmethod
+    async def stop(self) -> None: ...
+
+    @abc.abstractmethod
+    async def apply(self, accounts: Sequence[BrokerAccount], kick: Sequence[str] = ()) -> None:
+        """Replace the device accounts live. Removed or disabled accounts, and the usernames in ``kick`` (a new
+        password), are disconnected at once."""
+
+    @abc.abstractmethod
+    def status(self) -> dict[str, Any]:
+        """{"mode", "running", "pid", "version", "listeners": [...], "checks": [...], "error"}"""
+
+    @abc.abstractmethod
+    def connections(self) -> list[dict[str, Any]]:
+        """Devices connected now: [{"username", "client_id", "ip", "connected_at"}]."""

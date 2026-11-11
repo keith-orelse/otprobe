@@ -6,7 +6,7 @@ import asyncio
 from dataclasses import dataclass, field
 from typing import Any
 
-from app.adapters.base import CredentialVault, PackageTransfer
+from app.adapters.base import CredentialVault, MqttBroker, PackageTransfer
 from app.adapters.registry import AdapterRegistry
 from app.core.config import Settings
 from app.core.db import Database
@@ -31,6 +31,7 @@ class AppContext:
     tickets: StreamTickets
     extras: dict[str, Any]
     gate: Any = None            # live mode: app.adapters.real.net.gate.NetworkGate (None in the test simulator)
+    broker: MqttBroker | None = None    # the bundled MQTT broker (MQTT_BROKER=bundled), docs/MQTT_BROKER.md
     task_signals: dict[str, asyncio.Event] = field(default_factory=dict)
 
     def signal(self, agent_id: str) -> asyncio.Event:

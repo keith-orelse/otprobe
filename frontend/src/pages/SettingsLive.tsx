@@ -4,10 +4,12 @@ import { apiAction, apiGet, apiSend } from "../api";
 import { useMe } from "../auth";
 import { ErrorBox, Panel, Pill, ago } from "../components/ui";
 import type { AgentBuild, PluginInfo, SafetyView, ScanScope, VaultProfile } from "../types";
+import { MqttPanel } from "./MqttBroker";
 
 const LEVELS = ["?", "0", "1", "2", "3", "3.5", "4", "DMZ"];
 
-/** Live mode only: scan scope, safety controls and credential profiles. Admin-only writes. */
+/** Live mode only: scan scope, safety controls, credential profiles, agent builds and the MQTT broker. Admin-only
+ * writes. */
 export function LiveSettings() {
   const me = useMe();
   const admin = me.data?.role === "ADMIN";
@@ -17,6 +19,7 @@ export function LiveSettings() {
       <ScopePanel admin={admin} />
       <VaultPanel admin={admin} />
       <BuildsPanel admin={admin} />
+      <MqttPanel admin={admin} />
     </>
   );
 }

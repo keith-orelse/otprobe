@@ -64,7 +64,9 @@ To deploy the Go agent, the API must run over HTTPS so agents can pin its CA. St
 | Compliance | Rules as YAML: Windows and Linux baselines, scoring with UNKNOWN excluded, findings lifecycle, drift, agentless vs deep comparison |
 | Platform | REST `/api/v1`, Swagger at `/docs`, RFC 7807 errors, idempotency keys, SSE, hash-chained audit log, Alembic migrations |
 
-Not built yet: manual one-line install, user management, and the bundled MQTT broker (see the phase table in [docs/LIVE_ARCHITECTURE.md](docs/LIVE_ARCHITECTURE.md)).
+MQTT telemetry: OTProbe can run its own broker (`MQTT_BROKER=bundled`, needs Mosquitto). Devices get an account each in Settings → MQTT device accounts. See [docs/MQTT_BROKER.md](docs/MQTT_BROKER.md) and the office test [docs/TESTING_L6_MQTT.md](docs/TESTING_L6_MQTT.md).
+
+Not built yet: reading a plant's existing broker (MQTT Mode B), manual one-line install, and user management (see the phase table in [docs/LIVE_ARCHITECTURE.md](docs/LIVE_ARCHITECTURE.md)).
 
 ## Tests
 

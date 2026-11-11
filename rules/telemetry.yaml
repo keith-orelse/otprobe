@@ -1,16 +1,20 @@
 policy:
   id: ot-telemetry-thresholds
   name: OT Telemetry Thresholds
-  version: 1.0.0
+  version: 1.1.0
   kind: telemetry
-  description: Threshold and staleness checks evaluated on every MQTT message (and by a staleness timer).
+  description: >-
+    Threshold and staleness checks evaluated on every MQTT message (and by a staleness timer). Rules match a metric,
+    not a fixed device: "#" applies a rule to every topic whose message carries the evidence. A plain number on a topic
+    is named after the topic's last level (plant/line1/sensor01/temperature + 72.4 -> temperature: 72.4). Narrow the
+    topic filter (e.g. plant/line2/#) to give one area its own thresholds.
 
 rules:
   - id: TEL-TEMP-001
-    title: Line 1 temperature above warning threshold
+    title: Temperature above warning threshold
     severity: MEDIUM
     sources: [TELEMETRY]
-    topic: factory/line1/sensor01/temperature
+    topic: "#"
     evidence: temperature
     condition: "<= 80"
     expected: "<= 80 C"
@@ -18,10 +22,10 @@ rules:
     on_missing: { status: UNKNOWN }
 
   - id: TEL-TEMP-002
-    title: Line 1 temperature above critical threshold
+    title: Temperature above critical threshold
     severity: CRITICAL
     sources: [TELEMETRY]
-    topic: factory/line1/sensor01/temperature
+    topic: "#"
     evidence: temperature
     condition: "<= 95"
     expected: "<= 95 C"
@@ -29,10 +33,10 @@ rules:
     on_missing: { status: UNKNOWN }
 
   - id: TEL-PRES-001
-    title: Line 1 pressure above threshold
+    title: Pressure above threshold
     severity: HIGH
     sources: [TELEMETRY]
-    topic: factory/line1/sensor02/pressure
+    topic: "#"
     evidence: pressure
     condition: "<= 6.0"
     expected: "<= 6.0 bar"
@@ -43,10 +47,23 @@ rules:
     title: PLC status telemetry is current
     severity: HIGH
     sources: [TELEMETRY]
-    topic: factory/line1/plc01/status
+    topic: "#"
     evidence: mode
     condition: "== 'RUN'"
     stale_after_sec: 30
     expected: status message at least every 30 s with mode RUN
+    on_fail: { status: FAIL, severity: HIGH }
+    on_missing: { status: UNKNOWN }
+
+  - id: TEL-STALE-001
+    title: Telemetry source silent
+    severity: HIGH
+    sources: [TELEMETRY]
+    topic: "#"
+    evidence: mqtt.topic
+    condition: "is not empty"
+    stale_after_sec: 300
+    expected: a message at least every 5 minutes
+    remediation: Check the device is powered and on the network, and that its MQTT account is enabled.
     on_fail: { status: FAIL, severity: HIGH }
     on_missing: { status: UNKNOWN }

@@ -30,6 +30,12 @@ services:
       OTPROBE_APPROVER_PASSWORD: ${OTPROBE_APPROVER_PASSWORD:-}
       RULES_DIR: /app/rules
       AGENT_SERVER_URL: ${AGENT_SERVER_URL:-http://api:8000}
+      # Bundled MQTT broker (docs/MQTT_BROKER.md): devices connect to this host on 8883 (TLS). Its files live in
+      # /data/mqtt. TLS needs OTPROBE_TLS_CA_FILE with otprobe-server.pem/.key next to it (scripts/make_lab_tls.py).
+      MQTT_BROKER: ${MQTT_BROKER:-bundled}
+      MQTT_PORT: ${MQTT_PORT:-8883}
+      MQTT_PLAIN_PORT: ${MQTT_PLAIN_PORT:-0}
+      OTPROBE_TLS_CA_FILE: ${OTPROBE_TLS_CA_FILE:-}
     volumes:
       - otprobe-data:/data
       - otprobe-keys:/keys

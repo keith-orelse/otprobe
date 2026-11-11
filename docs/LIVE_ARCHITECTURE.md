@@ -71,7 +71,7 @@ flowchart LR
 |---|---|---|
 | `web` | nginx in a container, TLS on 443 | Console. Proxies `/api`. |
 | `api` | uvicorn in a container with **host networking** and `CAP_NET_RAW` only (needed for ICMP and ARP) | API, engines, real adapters, network gate, job runner, SSE hub, watchdogs, MQTT subscriber, agent download endpoint |
-| `mosquitto` | Official `eclipse-mosquitto:2.0.x` image (pinned) | Plant telemetry broker. See [MQTT_BROKER.md](MQTT_BROKER.md) |
+| `mosquitto` | Child process of `api` (`MQTT_BROKER=bundled`; Mosquitto is installed in the api image), decision L6-10 | Plant telemetry broker. See [MQTT_BROKER.md](MQTT_BROKER.md) |
 | Go agent | Windows service / systemd unit **on the target host** | Collects evidence locally and sends it to `api`. Never listens on a port |
 
 **Why host networking:** Docker's default bridge network hides layer 2. That breaks ARP and makes the scanner's
@@ -128,7 +128,7 @@ fails the build if any other module imports a networking primitive. This mirrors
 | Deployment | simulated WinRM writes to `sim_devices` | Generated `install.ps1` / `install.sh`, run over WinRM / SSH, or copied by hand |
 | Package | generated blob, real hash | Real signed binaries per OS/arch, `SHA256SUMS`, served over HTTPS |
 | Vault | synthetic secrets | **Real** secrets, Fernet-encrypted, key file outside the DB, write-only through the API, never logged |
-| MQTT | in-process broker + telemetry-sim | Bundled Mosquitto, TLS, ACLs. OTProbe subscribes only |
+| MQTT | in-process broker + telemetry-sim (tests only) | Bundled Mosquitto (child process), TLS, password/ACL files. OTProbe subscribes only |
 | Demo Controls, failure injection, Reset POC | yes | **removed**. Admin keeps "Clear inventory" (audited, typed confirmation) |
 | Banner | `SIMULATED ENVIRONMENT - NO REAL DEVICES ARE BEING SCANNED` | `LIVE NETWORK — scope: 10.20.0.0/24, 10.20.1.0/24` (red). When no scope is configured: `LIVE NETWORK — NO SCAN SCOPE CONFIGURED (scanning disabled)` |
 | Response header | `X-OTProbe-Environment: SIMULATED` | `X-OTProbe-Environment: LIVE` |
@@ -197,7 +197,7 @@ A manual install still needs an approved deployment. It skips `CONNECT…STAGE_P
 | **New** | `agent_builds` | `id, version, os, arch, variant (MODERN/LEGACY), sha256, size, signed, path, released_at` |
 | **New** | `agent_profiles` | `id (windows-workstation, …), os, collectors[], policy_id` (seeded from `/rules/agent_profiles.yaml`) |
 | **New** | `telemetry_sources` | `id, topic_filter, asset_id, metric, unit, payload_format (JSON_PATH/PLAIN/SPARKPLUG_B), json_path` |
-| **New** | `mqtt_accounts` | `username, role (OTPROBE_READER/PUBLISHER/AGENT), acl[], password_hash (mosquitto PBKDF2), disabled_at` |
+| **New** | `mqtt_accounts` (migration 0009) | `username, topic_prefix (unique, non-overlapping), asset_id, password_hash (Mosquitto PBKDF2), enabled` |
 | **New** | `download_tokens` | One-time agent download / manual-install tokens (hashed, TTL, bound to deployment) |
 | **Change** | `packages` | Replaced by `agent_builds` (packages table kept as a view for the existing API) |
 | **Change** | `agents` | `+ os, arch, variant, profile_id, agent_version, host_fingerprint` |
@@ -239,7 +239,7 @@ Agent-facing endpoints (`/agents/enroll`, heartbeat, tasks, evidence) keep their
 | `SAFE_MODE` | `true` | See [SAFETY_AND_SCOPE.md](SAFETY_AND_SCOPE.md) §4 |
 | `SCAN_MAX_PPS` | `50` | Global packets-per-second ceiling for active discovery |
 | `HEARTBEAT_INTERVAL_SEC`, `ASSESSMENT_INTERVAL_SEC`, `ENROLLMENT_*` | as POC | |
-| `MQTT_URL` | `mqtts://mosquitto:8883` | Bundled broker |
+| `MQTT_BROKER`, `MQTT_PORT`, `MQTT_PLAIN_PORT` | `bundled` (Docker) / `off`, `8883`, `0` | Bundled broker (docs/MQTT_BROKER.md) |
 | `DATABASE_URL` | `sqlite:////data/otprobe.db` | Postgres supported for larger sites |
 
 Removed: `SPEED_FACTOR`, `SEED`, `SIM_SERVICE_TOKEN`, `ADAPTER_MODE` (always `real` on `main`).
@@ -257,4 +257,5 @@ Each phase ends with a review stop, as before.
 | **L3** ✅ | Agentless: WinRM/WMI (read-only), SSH (read-only, host-key pinning), OT identification plugins (Modbus, S7, EtherNet/IP, BACnet, OPC UA, web title), classification signals, plugin selection per scope entry | Live tests against real Modbus/OPC UA/SSH/TLS servers and recording fake S7/ENIP/BACnet devices; Windows on a lab host |
 | **L4** ✅ | Go agent (Windows, Linux, macOS; legacy Windows/Linux builds on Go 1.20), signed release pipeline and verification, WinRM install/uninstall, real deployment, enrollment over pinned TLS, removal and restart. Manual one-liner install and Linux deployment over SSH moved to L6 | Go unit tests; the real Go agent through the deployment workflow on 127.0.0.1; Windows laptop by hand (docs/TESTING_L4.md) |
 | **L5** ✅ (rules) | Real assessments from Go agent evidence, Linux baseline, new Windows rules, drift on real hosts, generic Windows classification. **Bundled Mosquitto, telemetry sources and broker checks deferred** (decided 2026-11-05) | Rule-engine tests on Go-agent-shaped evidence; Windows laptop by hand (docs/TESTING_L5.md) |
+| **L6** (MQTT, Mode A) ✅ | Bundled Mosquitto as a child process, device accounts (one prefix each, password shown once), attribution by account or address, generic telemetry rules with a silent-device rule, broker checks, `scripts/fake_sensor.py`. Mode B (plant broker, read-only) not built | Real Mosquitto + TLS devices in tests; office test by hand (docs/TESTING_L6_MQTT.md) |
 | **L6** | ✅ Simulator moved out of `app/` into the test suite (L6-1). ✅ Linux deployment over SSH (L6-6). ✅ WinRM certificate pinning (L6-9). Still to do: manual one-liner install, user management; full lab campaign (acceptance + failure matrix), packet-capture verification, docs, pilot runbook | [LIVE_TEST_PLAN.md](LIVE_TEST_PLAN.md) |

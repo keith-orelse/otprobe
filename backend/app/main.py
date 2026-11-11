@@ -33,7 +33,7 @@ from app.core.pacing import Pacer
 from app.core.security import StreamTickets
 from app.models import AgentBuild
 from app.rules.book import RuleBook
-from app.services import agent_builds, safety
+from app.services import agent_builds, mqtt_accounts, safety
 from app.services.agents import run_watchdog
 from app.services.assessments import sync_policies
 from app.services.bootstrap import seed_live_users
@@ -57,6 +57,20 @@ class Environment(typing.Protocol):
               pacer: Pacer) -> dict: ...
 
 
+def _broker(settings: Settings):
+    """The bundled MQTT broker, Mode A (docs/MQTT_BROKER.md). None when MQTT_BROKER is not "bundled"."""
+    from urllib.parse import urlparse
+
+    from app.adapters.real import BundledBroker
+
+    if settings.mqtt_broker != "bundled":
+        return None
+    folder, cert, key = settings.mqtt_files()
+    return BundledBroker(folder, settings.mqtt_binary, settings.mqtt_port, settings.mqtt_plain_port,
+                         settings.mqtt_bind, cert, key, settings.tls_ca_file,
+                         urlparse(settings.public_url).hostname or "")
+
+
 def _live_parts(settings: Settings, db: Database, registry: AdapterRegistry) -> dict:
     from app.adapters.real import NetworkGate, register_real
     from app.adapters.real.transfer import RealPackageTransfer
@@ -66,7 +80,8 @@ def _live_parts(settings: Settings, db: Database, registry: AdapterRegistry) -> 
             log.warning("created account %r with generated password %r - change it after first login",
                         username, password)
     gate = NetworkGate(max_pps=settings.scan_max_pps)
-    register_real(registry, gate)
+    broker = _broker(settings)
+    register_real(registry, gate, broker)
 
     def resolve_build(package_id: str) -> str | None:
         """Local file of the verified agent build behind a package id (agent-<version>-<build id>)."""
@@ -77,7 +92,7 @@ def _live_parts(settings: Settings, db: Database, registry: AdapterRegistry) -> 
         return None
 
     transfer = RealPackageTransfer(registry.get, resolve_build)
-    return {"transfer": transfer, "gate": gate, "extras": {}}
+    return {"transfer": transfer, "gate": gate, "broker": broker, "extras": {}}
 
 
 def build_context(settings: Settings, plugins: Iterable[AdapterPlugin] = (),
@@ -104,7 +119,7 @@ def build_context(settings: Settings, plugins: Iterable[AdapterPlugin] = (),
     ctx = AppContext(settings=settings, db=db, hub=hub, registry=registry, vault=LocalCredentialVault(db, fernet),
                      runner=JobRunner(), pacer=pacer, rules=RuleBook.load(settings.rules_dir),
                      transfer=parts["transfer"], tickets=StreamTickets(),
-                     extras=parts["extras"], gate=parts["gate"])
+                     extras=parts["extras"], gate=parts["gate"], broker=parts.get("broker"))
     for plugin in plugins:
         plugin(registry, ctx)
     with db.session() as s:
@@ -132,6 +147,7 @@ def create_app(settings: Settings | None = None, adapter_plugins: Iterable[Adapt
     async def lifespan(app: FastAPI):
         ctx = build_context(settings, adapter_plugins, environment)
         app.state.ctx = ctx
+        await mqtt_accounts.start_broker(ctx)
         telemetry = ctx.extras["telemetry"] = TelemetryService(ctx)
         await telemetry.start()
         watchdog = asyncio.create_task(run_watchdog(ctx), name="heartbeat-watchdog")
@@ -141,6 +157,8 @@ def create_app(settings: Settings | None = None, adapter_plugins: Iterable[Adapt
             watchdog.cancel()
             await asyncio.gather(watchdog, return_exceptions=True)
             await telemetry.stop()
+            if ctx.broker is not None:
+                await ctx.broker.stop()
             await ctx.runner.shutdown()
             ctx.db.dispose()
 

@@ -73,6 +73,8 @@ def _inside_permit(tree: ast.AST) -> set[int]:
 def test_every_network_primitive_in_net_runs_inside_a_gate_permit(path: Path):
     if path.name in ("__init__.py", "gate.py", "_stream.py"):    # _stream.Exchange is checked where it is used
         return
+    if path.name == "broker.py":            # loopback only, to OTProbe's own broker: see the next test
+        return
     tree = ast.parse(path.read_text())
     inside = _inside_permit(tree)
     outside = []
@@ -82,6 +84,21 @@ def test_every_network_primitive_in_net_runs_inside_a_gate_permit(path: Path):
     assert not outside, f"{path.name}: network primitive outside gate.permit: {outside}"
 
 
+
+
+def test_the_bundled_broker_only_binds_and_connects_to_loopback():
+    """broker.py talks to OTProbe's own Mosquitto child process, never to a plant device (devices connect in), so it
+    is outside the network gate. Every bind and connect in it must name 127.0.0.1."""
+    tree = ast.parse((NET_DIR / "broker.py").read_text())
+    calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+             and n.func.attr in ("bind", "connect", "connect_async", "create_connection", "open_connection")]
+    assert len(calls) >= 3
+
+    def host(call: ast.Call) -> object:
+        arg = call.args[0]
+        return arg.elts[0].value if isinstance(arg, ast.Tuple) else getattr(arg, "value", None)
+
+    assert {host(c) for c in calls} == {"127.0.0.1"}, [ast.unparse(c) for c in calls]
 
 
 def test_snmp_module_cannot_build_a_set_request():

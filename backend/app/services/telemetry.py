@@ -1,4 +1,8 @@
-"""MQTT telemetry ingest: subscribe, store (bounded), attribute to assets, evaluate telemetry rules -> findings."""
+"""MQTT telemetry ingest: subscribe, store (bounded), attribute to assets, evaluate telemetry rules -> findings.
+
+A message belongs to an asset through its MQTT account (the bundled broker lets an account publish under its own topic
+prefix only), or else through the address the publisher connected from. Rules see the payload as an object: a plain
+number on ``.../temperature`` becomes ``{"temperature": <number>}``, and every message carries ``mqtt.topic``."""
 
 from __future__ import annotations
 
@@ -18,11 +22,12 @@ from app.core.clock import utcnow
 from app.core.mqtt_topics import topic_matches
 from app.engines.assessment.engine import RuleOutcome, evaluate_policy
 from app.engines.assessment.findings import apply_outcome
-from app.models import Asset, Finding, TelemetryMessage
+from app.models import Asset, Finding, MqttAccount, TelemetryMessage
+from app.rules.conditions import MISSING, resolve_path
 
 log = logging.getLogger("otprobe.telemetry")
 ACTOR = system("telemetry-engine")
-SUBSCRIPTION = "factory/#"
+SUBSCRIPTION = "#"
 
 
 class TelemetryService:
@@ -46,6 +51,9 @@ class TelemetryService:
             await self.mqtt.unsubscribe(self.sub_id)
 
     async def _asset_for(self, session: Session, client_id: str) -> Asset | None:
+        account = session.scalar(select(MqttAccount).where(MqttAccount.username == client_id)) if client_id else None
+        if account is not None and account.asset_id:
+            return session.get(Asset, account.asset_id)
         if client_id not in self._ip_by_client:
             self._ip_by_client = {c["client_id"]: c["source_ip"] for c in await self.mqtt.clients()}
         ip = self._ip_by_client.get(client_id)
@@ -89,8 +97,7 @@ class TelemetryService:
                            f"{(' ' + unit) if unit else ''} on {topic}; expected {outcome.expected}"})
 
     def _evaluate(self, s: Session, asset: Asset, topic: str, payload: Any, client_id: str = "") -> None:
-        if not isinstance(payload, dict):
-            return
+        payload = evidence(topic, payload)
         for policy in self.policies():
             rules = [r for r in policy["rules"] if topic_matches(r["topic"], topic)]
             if not rules:
@@ -100,27 +107,63 @@ class TelemetryService:
                     self._apply(s, asset, outcome, topic, client_id, str(payload.get("unit", "")))
 
     def staleness_tick(self) -> None:
+        """A rule with ``stale_after_sec`` fails for an asset when none of its topics that carry the rule's evidence
+        has had a message within the window. The next such message evaluates the rule again and resolves it."""
         scale = self.ctx.settings.telemetry_time_scale
         now = utcnow()
         with self.ctx.db.session() as s:
+            latest = list(s.execute(select(TelemetryMessage.asset_id, TelemetryMessage.topic,
+                                           func.max(TelemetryMessage.received_at))
+                                    .where(TelemetryMessage.asset_id.is_not(None))
+                                    .group_by(TelemetryMessage.asset_id, TelemetryMessage.topic)))
             for policy in self.policies():
                 for rule in policy["rules"]:
                     window = rule.get("stale_after_sec")
                     if not window:
                         continue
-                    last = s.scalar(select(TelemetryMessage).where(TelemetryMessage.topic == rule["topic"],
-                                                                   TelemetryMessage.asset_id.is_not(None))
-                                    .order_by(TelemetryMessage.received_at.desc()).limit(1))
-                    if last is None or now - last.received_at < timedelta(seconds=window * scale):
-                        continue
-                    asset = s.get(Asset, last.asset_id)
-                    age = int((now - last.received_at).total_seconds())
-                    outcome = RuleOutcome(rule["id"], rule["title"], rule["on_fail"]["status"],
-                                          rule["on_fail"].get("severity", rule["severity"]), rule["severity"],
-                                          rule["evidence"], f"no message for {age} s", rule.get("expected", ""),
-                                          f"telemetry stale on {rule['topic']}", list(rule.get("references", [])),
-                                          rule.get("remediation"))
-                    self._apply(s, asset, outcome, rule["topic"])
+                    newest: dict[str, tuple[str, Any]] = {}
+                    for asset_id, topic, at in latest:
+                        if not topic_matches(rule["topic"], topic) or not self._carries(s, topic, at, rule):
+                            continue
+                        if asset_id not in newest or at > newest[asset_id][1]:
+                            newest[asset_id] = (topic, at)
+                    for asset_id, (topic, at) in newest.items():
+                        if now - at < timedelta(seconds=window * scale):
+                            continue
+                        age = int((now - at).total_seconds())
+                        outcome = RuleOutcome(rule["id"], rule["title"], rule["on_fail"]["status"],
+                                              rule["on_fail"].get("severity", rule["severity"]), rule["severity"],
+                                              rule["evidence"], f"no message for {age} s", rule.get("expected", ""),
+                                              f"telemetry stale on {topic}", list(rule.get("references", [])),
+                                              rule.get("remediation"))
+                        self._apply(s, s.get(Asset, asset_id), outcome, topic)
+
+    @staticmethod
+    def _carries(s: Session, topic: str, at: Any, rule: dict[str, Any]) -> bool:
+        """Whether the latest message on ``topic`` has the rule's evidence (a temperature topic says nothing
+        about a PLC's status)."""
+        msg = s.scalar(select(TelemetryMessage).where(TelemetryMessage.topic == topic,
+                                                      TelemetryMessage.received_at == at).limit(1))
+        return msg is not None and resolve_path(evidence(topic, msg.payload), rule["evidence"]) is not MISSING
+
+
+def evidence(topic: str, payload: Any) -> dict[str, Any]:
+    """The document telemetry rules see. Objects as they are; a plain number is named after the topic's last level
+    (``plant/line1/sensor01/temperature`` + ``72.4`` -> ``{"temperature": 72.4}``); other payloads only carry the
+    topic. ``mqtt.topic`` is always present, for rules that only care that messages arrive."""
+    if isinstance(payload, dict):
+        doc = dict(payload)
+    elif isinstance(payload, (int, float)) and not isinstance(payload, bool):
+        doc = {topic.rsplit("/", 1)[-1]: payload}
+    elif isinstance(payload, str):
+        try:
+            doc = {topic.rsplit("/", 1)[-1]: float(payload)}
+        except ValueError:
+            doc = {topic.rsplit("/", 1)[-1]: payload}
+    else:
+        doc = {}
+    doc.setdefault("mqtt", {"topic": topic})
+    return doc
 
 
 def topics(session: Session) -> list[schemas.TelemetryTopic]:
