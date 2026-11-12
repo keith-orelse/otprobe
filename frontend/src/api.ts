@@ -21,6 +21,17 @@ async function handle<T>(res: Response): Promise<T> {
   throw new ApiError(problem);
 }
 
+/** A fresh Idempotency-Key. crypto.randomUUID() exists only on HTTPS or localhost, and the console is also opened over
+ * plain HTTP from other computers (http://<host>:5173), so fall back to getRandomValues, which works everywhere. */
+function newKey(): string {
+  if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
+  const b = crypto.getRandomValues(new Uint8Array(16));
+  b[6] = (b[6] & 0x0f) | 0x40;
+  b[8] = (b[8] & 0x3f) | 0x80;
+  const h = Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+}
+
 function headers(extra?: Record<string, string>): Record<string, string> {
   const token = getToken();
   return { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...extra };
@@ -39,7 +50,7 @@ export function apiGet<T>(path: string, params?: Record<string, string | number 
 export function apiAction<T>(path: string, body?: unknown): Promise<T> {
   return fetch(`/api/v1${path}`, {
     method: "POST",
-    headers: headers({ "Content-Type": "application/json", "Idempotency-Key": crypto.randomUUID() }),
+    headers: headers({ "Content-Type": "application/json", "Idempotency-Key": newKey() }),
     body: body === undefined ? undefined : JSON.stringify(body),
   }).then((r) => handle<T>(r));
 }
@@ -54,7 +65,7 @@ export function apiLogin(username: string, password: string) {
 export function apiSend<T>(method: "PUT" | "PATCH" | "DELETE", path: string, body?: unknown): Promise<T> {
   return fetch(`/api/v1${path}`, {
     method,
-    headers: headers({ "Content-Type": "application/json", "Idempotency-Key": crypto.randomUUID() }),
+    headers: headers({ "Content-Type": "application/json", "Idempotency-Key": newKey() }),
     body: body === undefined ? undefined : JSON.stringify(body),
   }).then((r) => handle<T>(r));
 }
