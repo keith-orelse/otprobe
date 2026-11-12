@@ -6,6 +6,9 @@ eligibility:
   - when: { classification.type: "in ['Sensor', 'Industrial Switch', 'BACnet Controller', 'Modbus Device']" }
     result: NOT_ELIGIBLE
     reason: Embedded or network device; agentless monitoring only.
+  - when: { classification.type: "== 'Windows Host'" }
+    result: NOT_ELIGIBLE
+    reason: Looks like Windows (ports 135/445/3389), but WinRM did not answer. Set up WinRM over HTTPS (port 5986) and run the agentless probe again.
   - when: { os.family: "== 'macos'" }
     result: NOT_SUPPORTED
     reason: macOS agent is not part of the first agent release; agentless only (SSH).

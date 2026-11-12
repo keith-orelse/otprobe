@@ -40,6 +40,16 @@ types:
       - { name: Windows Server OS, field: os.name, condition: "contains 'Server'", weight: 30 }
       - { name: No SCADA software found, field: "software.installed[].name", condition: "not matches '(SCADA|WinCC|FactoryTalk|Ignition)'", weight: 70 }
 
+  # Windows recognised by its ports alone, when WinRM did not answer so the OS is not known yet. "OS not identified"
+  # keeps it below the Windows Workstation / Server types once WinRM reports the OS (70 % against 100 %).
+  - type: Windows Host
+    default_criticality: MEDIUM
+    level_hint: 3
+    signals:
+      - { name: Windows file sharing / RPC ports open, field: network.open_ports, condition: "intersects [135, 445]", weight: 50 }
+      - { name: Remote Desktop port open, field: network.open_ports, condition: "contains 3389", weight: 20 }
+      - { name: OS not identified yet (no WinRM), field: os.name, condition: "is empty", weight: 30 }
+
   - type: Historian (Linux Server)
     default_criticality: HIGH
     level_hint: 2
@@ -88,4 +98,6 @@ types:
       - { name: Vendor reported, field: hardware.vendor, condition: "is not empty", weight: 20 }
       # A controller that also serves Modbus must stay a PLC: this signal only matches Modbus-only devices, and
       # without it the type stays below min_confidence (60 of 200 = 30 %).
-      - { name: Not identified as a controller by S7 or EtherNet/IP, field: ot.protocols, condition: "not intersects ['s7', 'enip']", weight: 140 }
+      # Only for devices that speak Modbus: on its own, "not S7 / EtherNet/IP" also matched a Windows server whose only
+      # OT protocol was an OPC UA discovery service (Arcon test, 2026-11-12).
+      - { name: Modbus only (not an S7 or EtherNet/IP controller), field: ot.protocols, condition: "contains 'modbus' and not intersects ['s7', 'enip']", weight: 140 }
