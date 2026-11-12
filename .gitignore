@@ -20,3 +20,7 @@ backend/otprobe.db*
 # Release signing keys (private) and built agents
 keys/
 backend/tls/
+
+# Bundled MQTT broker files, generated at start-up (docs/MQTT_BROKER.md)
+backend/mqtt/
+mqtt/
